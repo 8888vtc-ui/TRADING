@@ -1,5 +1,5 @@
 """
-🚀 LEVERAGE MANAGER V2.0 - PROTECTION DU CAPITAL
+🚀 LEVERAGE MANAGER V2.0
 """
 import logging
 from typing import Dict
@@ -33,11 +33,9 @@ class LeverageDecision:
 
 class LeverageManager:
     def __init__(self, market_checker=None):
-        self.market_checker = market_checker
         self.max_leverage = 5.0
         self.leveraged_positions = 0
         self.max_leveraged_positions = 3
-        self.daily_leveraged_trades = 0
         self.unified_score = 50
         self.panic_mode = False
         self.fear_greed = 50
@@ -49,10 +47,7 @@ class LeverageManager:
     def set_market_conditions(self, fear_greed: int, market_change_24h: float):
         self.fear_greed = fear_greed
         self.market_change_24h = market_change_24h
-        old_panic = self.panic_mode
         self.panic_mode = (fear_greed < 20 and market_change_24h < -3)
-        if self.panic_mode and not old_panic:
-            logger.warning("🚨 MODE PANIC ACTIVÉ!")
     
     def set_unified_score(self, score: int):
         self.unified_score = max(0, min(100, score))
@@ -83,7 +78,6 @@ class LeverageManager:
     
     def open_leveraged_position(self): self.leveraged_positions += 1
     def close_leveraged_position(self, pnl): self.leveraged_positions = max(0, self.leveraged_positions - 1)
-    def reset_daily(self): self.daily_leveraged_trades = 0
     def get_status(self):
         lev, direction = self.get_optimal_leverage_and_direction()
         return {'unified_score': self.unified_score, 'leverage': f'{lev}x', 'direction': direction.value, 'panic_mode': self.panic_mode}
