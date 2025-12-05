@@ -1,20 +1,22 @@
 """
-🔥 BOT DE SCALPING ULTRA-OPTIMISÉ NASDAQ
-=========================================
-Version: 2.0 - Maximum Performance
-Stratégie: Confluence multi-indicateurs
+🔥 BOT DE SCALPING ULTRA-OPTIMISÉ NASDAQ V2.1
+=============================================
+Version: 2.1 - Avec News Sentiment & Protection Division/0
+Stratégie: Confluence multi-indicateurs + News
 Timeframe: 1-5 minutes
 Déploiement: Railway (gratuit)
 
 CARACTÉRISTIQUES:
 - 7 indicateurs en confluence
+- 📰 Intégration News Sentiment API
+- ✅ Protection contre division par zéro
 - Gestion de risque stricte (0.5% par trade)
 - Trailing stop adaptatif
 - Horaires de trading optimaux
 - Scan toutes les 60 secondes
 
 OBJECTIFS:
-- Win Rate: 65-70%
+- Win Rate: 65-75%
 - Ratio R/R: 1:2
 - Max 20 trades/jour
 """
@@ -31,6 +33,7 @@ import pandas as pd
 
 from scalping_strategy import ScalpingStrategy
 from scalping_risk import ScalpingRiskManager
+from news_sentiment import get_sentiment_analyzer
 
 # ═══════════════════════════════════════════════════════════
 # CONFIGURATION DU LOGGING
@@ -114,14 +117,16 @@ SCAN_INTERVAL_SECONDS = 60  # Toutes les 60 secondes
 
 class ScalpingBot:
     """
-    Bot de Scalping Ultra-Optimisé
-    ==============================
-    Trades rapides avec gestion de risque stricte
+    Bot de Scalping Ultra-Optimisé V2.1
+    ====================================
+    - Trades rapides avec gestion de risque stricte
+    - Intégration News Sentiment
+    - Protection division par zéro
     """
     
     def __init__(self):
         logger.info("=" * 60)
-        logger.info("🔥 INITIALISATION DU BOT DE SCALPING")
+        logger.info("🔥 INITIALISATION DU BOT DE SCALPING V2.1")
         logger.info("=" * 60)
         
         # Connexion API Alpaca
@@ -141,6 +146,10 @@ class ScalpingBot:
         except Exception as e:
             logger.error(f"❌ Erreur connexion API: {e}")
             raise
+        
+        # Initialiser l'analyseur de sentiment
+        self.sentiment_analyzer = get_sentiment_analyzer()
+        logger.info("📰 Analyseur de sentiment initialisé")
         
         # Initialiser la stratégie et le risk manager
         self.strategy = ScalpingStrategy()
@@ -371,10 +380,11 @@ class ScalpingBot:
     def scan_for_signals(self):
         """
         Scanne tous les symboles pour des opportunités de scalping
+        Avec intégration News Sentiment
         """
         is_time, session, time_info = self.is_scalping_time()
         
-        logger.info(f"🔍 SCAN SCALPING - {time_info}")
+        logger.info(f"🔍 SCAN SCALPING V2.1 - {time_info}")
         
         if not is_time:
             logger.info(f"🔒 {session} - Vérification des positions uniquement")
@@ -398,14 +408,21 @@ class ScalpingBot:
             if symbol in self.risk_manager.open_positions:
                 continue
             
+            # 📰 Vérifier le sentiment des news
+            should_trade, sentiment_reason, sentiment_score = self.sentiment_analyzer.should_trade(symbol)
+            
+            if not should_trade:
+                logger.info(f"📰 {symbol}: Skip - {sentiment_reason}")
+                continue
+            
             # Récupérer les données
             df = self.get_market_data(symbol, timeframe='1Min', limit=100)
             
             if df.empty:
                 continue
             
-            # Générer le signal
-            signal = self.strategy.generate_signal(df)
+            # Générer le signal AVEC le sentiment
+            signal = self.strategy.generate_signal(df, news_sentiment=sentiment_score)
             
             if signal['signal'] == 'BUY' and signal['confidence'] >= 60:
                 self.session_stats['signals_generated'] += 1
@@ -413,6 +430,7 @@ class ScalpingBot:
                 logger.info(f"🎯 SIGNAL ACHAT: {symbol}")
                 logger.info(f"   Confiance: {signal['confidence']:.1f}%")
                 logger.info(f"   Score: {signal['score']}/{signal['max_score']}")
+                logger.info(f"   📰 Sentiment: {sentiment_score:.2f} ({sentiment_reason})")
                 for reason in signal.get('reasons', [])[:5]:
                     logger.info(f"   {reason}")
                 
