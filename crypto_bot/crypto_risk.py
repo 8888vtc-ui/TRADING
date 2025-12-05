@@ -1,13 +1,13 @@
 """
-🛡️ GESTIONNAIRE DE RISQUE CRYPTO - ULTRA CONSERVATEUR
-=====================================================
-Priorité absolue: PROTÉGER LE CAPITAL
+🛡️ GESTIONNAIRE DE RISQUE CRYPTO - MODE PAPER TRADING AGRESSIF
+==============================================================
+⚠️ PARAMÈTRES AGRESSIFS POUR TEST EN PAPER TRADING
 
-Règles strictes:
-- Petites positions
-- Stops obligatoires
-- Limites journalières
-- Pas de trading sur news majeures
+Risque par trade: 1-2% (au lieu de 0.5%)
+Positions max: 5 (au lieu de 3)
+Exposition max: 80% (au lieu de 60%)
+
+À RÉDUIRE AVANT PASSAGE EN RÉEL!
 """
 
 import pandas as pd
@@ -30,44 +30,43 @@ def safe_divide(n, d, default=0.0):
 
 class CryptoRiskManager:
     """
-    Gestionnaire de Risque ULTRA CONSERVATEUR pour Crypto
-    =====================================================
+    🚀 RISK MANAGER - MODE PAPER TRADING AGRESSIF
+    =============================================
     
-    Principes:
-    1. Capital preservation avant profit
-    2. Positions petites
-    3. Diversification obligatoire
-    4. Arrêt automatique si mauvaise journée
+    ⚠️ Ces paramètres sont pour TESTER les limites
+    À réduire avant passage en réel!
     """
     
     def __init__(self, api):
         self.api = api
         
+        logger.info("🚀 RISK MANAGER - MODE PAPER TRADING AGRESSIF")
+        
         # ═══════════════════════════════════════════════════════════
-        # PARAMÈTRES ULTRA CONSERVATEURS
+        # 🔥 PARAMÈTRES AGRESSIFS (PAPER TRADING)
         # ═══════════════════════════════════════════════════════════
         
-        # Allocation par crypto (sur capital crypto total)
+        # Allocation par crypto (plus généreuse)
         self.max_per_crypto = {
-            'BTC/USD': 0.40,    # Max 40% en BTC
-            'ETH/USD': 0.35,    # Max 35% en ETH
-            'SOL/USD': 0.15,    # Max 15% en SOL
-            'AVAX/USD': 0.10,   # Max 10% en AVAX
-            'default': 0.10
+            'BTC/USD': 0.50,    # Max 50% en BTC
+            'ETH/USD': 0.45,    # Max 45% en ETH
+            'SOL/USD': 0.30,    # Max 30% en SOL
+            'AVAX/USD': 0.20,   # Max 20% en AVAX
+            'default': 0.20
         }
         
-        # Risque par trade (très conservateur)
-        self.risk_per_trade = 0.005  # 0.5% du capital par trade
-        self.max_daily_risk = 0.02   # 2% perte max par jour
+        # 🔥 Risque par trade AUGMENTÉ
+        self.risk_per_trade = 0.015   # 1.5% du capital par trade (vs 0.5%)
+        self.max_daily_risk = 0.08    # 8% perte max par jour (vs 2%)
         
-        # Limites
-        self.max_positions = 3       # Max 3 cryptos en même temps
-        self.max_exposure = 0.60     # Max 60% du capital exposé
-        self.min_cash = 0.30         # Toujours garder 30% en cash
+        # 🔥 Limites AUGMENTÉES
+        self.max_positions = 5        # 5 positions (vs 3)
+        self.max_exposure = 0.80      # 80% exposé (vs 60%)
+        self.min_cash = 0.15          # 15% cash min (vs 30%)
         
-        # Protection
-        self.max_consecutive_losses = 3
-        self.cooldown_after_loss = 30  # minutes
+        # Protection (gardée pour éviter catastrophe)
+        self.max_consecutive_losses = 5   # 5 pertes avant pause (vs 3)
+        self.cooldown_after_loss = 15     # 15 min cooldown (vs 30)
         
         # Tracking
         self.daily_pnl = 0
@@ -76,12 +75,16 @@ class CryptoRiskManager:
         self.last_loss_time = None
         self.positions = {}
         
-        # Cryptos autorisées (les plus sûres)
+        # Cryptos autorisées
         self.allowed_cryptos = [
-            'BTC/USD',   # Bitcoin - Le plus stable
-            'ETH/USD',   # Ethereum - #2
-            'SOL/USD',   # Solana - Haute liquidité
+            'BTC/USD',
+            'ETH/USD',
+            'SOL/USD',
         ]
+        
+        logger.info(f"   Risque/trade: {self.risk_per_trade*100}%")
+        logger.info(f"   Max positions: {self.max_positions}")
+        logger.info(f"   Max exposition: {self.max_exposure*100}%")
     
     def get_account_info(self) -> Dict:
         """Récupère les infos du compte"""
@@ -109,7 +112,7 @@ class CryptoRiskManager:
             
             for pos in positions:
                 symbol = pos.symbol
-                if symbol in self.allowed_cryptos or '/USD' in symbol:
+                if symbol in self.allowed_cryptos or '/USD' in symbol or 'USD' in symbol:
                     crypto_positions.append({
                         'symbol': symbol,
                         'qty': float(pos.qty),
@@ -126,10 +129,7 @@ class CryptoRiskManager:
             return []
     
     def can_trade(self, symbol: str, signal_confidence: float) -> Dict:
-        """
-        Vérifie si on peut trader
-        Retourne des détails sur la décision
-        """
+        """Vérifie si on peut trader - MODE AGRESSIF"""
         result = {
             'can_trade': False,
             'reason': '',
@@ -138,19 +138,19 @@ class CryptoRiskManager:
         
         # Vérifier si crypto autorisée
         if symbol not in self.allowed_cryptos:
-            result['reason'] = f"{symbol} non autorisée (seulement {self.allowed_cryptos})"
+            result['reason'] = f"{symbol} non autorisée"
             return result
         
         # Vérifier pertes consécutives
         if self.consecutive_losses >= self.max_consecutive_losses:
-            result['reason'] = f"Pause après {self.consecutive_losses} pertes consécutives"
+            result['reason'] = f"Pause après {self.consecutive_losses} pertes"
             return result
         
         # Cooldown après perte
         if self.last_loss_time:
             minutes_since = (datetime.now() - self.last_loss_time).seconds / 60
             if minutes_since < self.cooldown_after_loss:
-                result['reason'] = f"Cooldown: {self.cooldown_after_loss - minutes_since:.0f} min restantes"
+                result['reason'] = f"Cooldown: {self.cooldown_after_loss - minutes_since:.0f} min"
                 return result
         
         # Vérifier perte journalière
@@ -158,29 +158,29 @@ class CryptoRiskManager:
         portfolio_value = account['portfolio_value']
         
         if portfolio_value <= 0:
-            result['reason'] = "Erreur récupération compte"
+            result['reason'] = "Erreur compte"
             return result
         
         daily_loss_pct = safe_divide(-self.daily_pnl, portfolio_value, 0)
         if daily_loss_pct >= self.max_daily_risk:
-            result['reason'] = f"Limite perte journalière atteinte ({daily_loss_pct*100:.2f}%)"
+            result['reason'] = f"Limite perte jour ({daily_loss_pct*100:.1f}%)"
             return result
         
         # Vérifier cash minimum
         cash_ratio = account['cash_ratio']
         if cash_ratio < self.min_cash:
-            result['reason'] = f"Cash insuffisant ({cash_ratio*100:.1f}% < {self.min_cash*100}%)"
+            result['reason'] = f"Cash insuffisant ({cash_ratio*100:.1f}%)"
             return result
         
         # Vérifier nombre de positions
         positions = self.get_positions()
         if len(positions) >= self.max_positions:
-            result['reason'] = f"Max positions atteint ({len(positions)}/{self.max_positions})"
+            result['reason'] = f"Max positions ({len(positions)}/{self.max_positions})"
             return result
         
-        # Vérifier si déjà en position sur ce symbole
+        # Vérifier si déjà en position
         for pos in positions:
-            if pos['symbol'] == symbol:
+            if pos['symbol'] == symbol or symbol.replace('/', '') in pos['symbol']:
                 result['reason'] = f"Déjà en position sur {symbol}"
                 return result
         
@@ -188,40 +188,35 @@ class CryptoRiskManager:
         total_exposure = sum(p['market_value'] for p in positions)
         exposure_ratio = safe_divide(total_exposure, portfolio_value, 0)
         if exposure_ratio >= self.max_exposure:
-            result['reason'] = f"Exposition max atteinte ({exposure_ratio*100:.1f}%)"
+            result['reason'] = f"Exposition max ({exposure_ratio*100:.1f}%)"
             return result
         
-        # Vérifier confiance minimum
-        min_confidence = 65
+        # Confiance minimum (abaissé pour paper)
+        min_confidence = 55  # 55% au lieu de 65%
         if signal_confidence < min_confidence:
-            result['reason'] = f"Confiance insuffisante ({signal_confidence:.0f}% < {min_confidence}%)"
+            result['reason'] = f"Confiance ({signal_confidence:.0f}% < {min_confidence}%)"
             return result
         
-        # TOUT EST OK - Calculer taille position
+        # TOUT EST OK
         max_crypto = self.max_per_crypto.get(symbol, self.max_per_crypto['default'])
         max_position = portfolio_value * max_crypto
         
-        # Réduire si confiance moyenne
-        if signal_confidence < 75:
-            max_position *= 0.7
+        # Bonus si haute confiance
+        if signal_confidence >= 85:
+            max_position *= 1.2
         
-        # Limiter à l'exposition restante
         remaining_exposure = (self.max_exposure * portfolio_value) - total_exposure
         max_position = min(max_position, remaining_exposure)
         
         result['can_trade'] = True
         result['max_position_value'] = max_position
-        result['reason'] = f"OK - Max position: ${max_position:.2f}"
+        result['reason'] = f"OK - Max: ${max_position:.2f}"
         
         return result
     
     def calculate_position_size(self, symbol: str, price: float, 
                                stop_loss: float, confidence: float) -> Dict:
-        """
-        Calcule la taille de position basée sur le risque
-        
-        Méthode: Position Sizing par risque fixe
-        """
+        """Calcule la taille de position - MODE AGRESSIF"""
         check = self.can_trade(symbol, confidence)
         
         if not check['can_trade']:
@@ -230,26 +225,28 @@ class CryptoRiskManager:
         account = self.get_account_info()
         portfolio_value = account['portfolio_value']
         
-        # Risque en $ = 0.5% du portfolio
+        # 🔥 Risque augmenté en paper trading
         risk_amount = portfolio_value * self.risk_per_trade
         
-        # Distance au stop
+        # Bonus risque si haute confiance
+        if confidence >= 90:
+            risk_amount *= 1.5
+        elif confidence >= 80:
+            risk_amount *= 1.2
+        
         stop_distance = abs(price - stop_loss)
         stop_pct = safe_divide(stop_distance, price, 0.02)
         
-        # Taille basée sur le risque
         if stop_distance > 0:
             position_value = safe_divide(risk_amount, stop_pct, 0)
         else:
-            position_value = risk_amount * 10  # Fallback
+            position_value = risk_amount * 10
         
-        # Limiter à max position
         position_value = min(position_value, check['max_position_value'])
         
-        # Quantité
         qty = safe_divide(position_value, price, 0)
         
-        # Arrondir pour crypto (minimum notionnel)
+        # Arrondir
         if symbol == 'BTC/USD':
             qty = round(qty, 4)
             min_qty = 0.0001
@@ -261,12 +258,12 @@ class CryptoRiskManager:
             min_qty = 0.01
         
         if qty < min_qty:
-            return {'qty': 0, 'reason': f"Quantité trop faible ({qty})", 'can_trade': False}
+            return {'qty': 0, 'reason': f"Quantité trop faible", 'can_trade': False}
         
         actual_value = qty * price
         actual_risk = qty * stop_distance
         
-        logger.info(f"📊 Position {symbol}:")
+        logger.info(f"📊 Position {symbol} (MODE AGRESSIF):")
         logger.info(f"   Quantité: {qty} (~${actual_value:.2f})")
         logger.info(f"   Risque: ${actual_risk:.2f} ({stop_pct*100:.2f}%)")
         
@@ -276,11 +273,11 @@ class CryptoRiskManager:
             'position_value': actual_value,
             'risk_amount': actual_risk,
             'risk_pct': stop_pct * 100,
-            'reason': f"Position: {qty} {symbol} (${actual_value:.2f})"
+            'reason': f"Position: {qty} {symbol}"
         }
     
     def record_trade(self, pnl: float, trade_type: str = 'CLOSE'):
-        """Enregistre un trade pour le suivi"""
+        """Enregistre un trade"""
         self.daily_pnl += pnl
         self.daily_trades += 1
         
@@ -291,16 +288,16 @@ class CryptoRiskManager:
         else:
             self.consecutive_losses = 0
             self.last_loss_time = None
-            logger.info(f"✅ Gain: ${pnl:.2f}")
+            logger.info(f"✅ Gain: +${pnl:.2f}")
     
     def reset_daily(self):
-        """Reset des compteurs journaliers (à appeler à minuit)"""
-        logger.info(f"📊 Résumé journée: PnL ${self.daily_pnl:.2f}, Trades: {self.daily_trades}")
+        """Reset journalier"""
+        logger.info(f"📊 Résumé: PnL ${self.daily_pnl:.2f}, Trades: {self.daily_trades}")
         self.daily_pnl = 0
         self.daily_trades = 0
     
     def get_risk_status(self) -> Dict:
-        """Statut complet du risque"""
+        """Statut complet"""
         account = self.get_account_info()
         positions = self.get_positions()
         
@@ -308,6 +305,7 @@ class CryptoRiskManager:
         total_pnl = sum(p['unrealized_pl'] for p in positions)
         
         return {
+            'mode': '🔥 PAPER TRADING AGRESSIF',
             'portfolio_value': account['portfolio_value'],
             'cash': account['cash'],
             'cash_ratio': account['cash_ratio'] * 100,
@@ -324,7 +322,7 @@ class CryptoRiskManager:
         }
     
     def check_all_exits(self, strategy) -> List[Dict]:
-        """Vérifie toutes les positions pour sortie"""
+        """Vérifie sorties"""
         exits = []
         positions = self.get_positions()
         
@@ -334,7 +332,6 @@ class CryptoRiskManager:
             current = pos['current_price']
             highest = self.positions.get(symbol, {}).get('highest', current)
             
-            # Mise à jour du plus haut
             if current > highest:
                 if symbol not in self.positions:
                     self.positions[symbol] = {}
@@ -362,14 +359,15 @@ class CryptoRiskManager:
 
 
 class CryptoVolatilityFilter:
-    """Filtre les moments de volatilité extrême"""
+    """Filtre volatilité - MODE AGRESSIF"""
     
     def __init__(self):
-        self.max_hourly_move = 5.0   # 5% max en 1h
-        self.max_daily_move = 15.0   # 15% max en 24h
+        # Plus permissif en paper trading
+        self.max_hourly_move = 8.0    # 8% (vs 5%)
+        self.max_daily_move = 20.0    # 20% (vs 15%)
     
     def is_safe_to_trade(self, df: pd.DataFrame) -> Dict:
-        """Vérifie si la volatilité est acceptable"""
+        """Vérifie volatilité - plus permissif en paper"""
         if len(df) < 2:
             return {'safe': False, 'reason': 'Données insuffisantes'}
         
@@ -381,28 +379,32 @@ class CryptoVolatilityFilter:
         daily_change = abs(safe_divide(current - daily, daily, 0)) * 100
         
         if hourly_change > self.max_hourly_move:
-            return {
-                'safe': False,
-                'reason': f"Volatilité horaire extrême: {hourly_change:.1f}%"
-            }
+            return {'safe': False, 'reason': f"Volatilité horaire: {hourly_change:.1f}%"}
         
         if daily_change > self.max_daily_move:
-            return {
-                'safe': False,
-                'reason': f"Volatilité journalière extrême: {daily_change:.1f}%"
-            }
+            return {'safe': False, 'reason': f"Volatilité journalière: {daily_change:.1f}%"}
         
-        return {
-            'safe': True,
-            'hourly_change': hourly_change,
-            'daily_change': daily_change
-        }
+        return {'safe': True, 'hourly_change': hourly_change, 'daily_change': daily_change}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 📋 PARAMÈTRES CONSERVATEURS (POUR PASSAGE EN RÉEL)
+# ═══════════════════════════════════════════════════════════════════
+"""
+QUAND TU PASSES EN RÉEL, MODIFIER:
+
+self.risk_per_trade = 0.005   # 0.5%
+self.max_daily_risk = 0.02    # 2%
+self.max_positions = 3
+self.max_exposure = 0.60
+self.min_cash = 0.30
+self.max_consecutive_losses = 3
+"""
 
 
 if __name__ == "__main__":
-    print("🛡️ Risk Manager Crypto - Ultra Conservateur")
-    print(f"   Risque par trade: 0.5%")
-    print(f"   Perte max journalière: 2%")
-    print(f"   Max positions: 3")
-    print(f"   Cryptos autorisées: BTC, ETH, SOL")
-
+    print("🚀 Risk Manager - MODE PAPER TRADING AGRESSIF")
+    print(f"   Risque par trade: 1.5%")
+    print(f"   Perte max journalière: 8%")
+    print(f"   Max positions: 5")
+    print(f"   Exposition max: 80%")
