@@ -104,7 +104,8 @@ class TradingStrategy:
                 TimeFrame.Day,
                 start.strftime('%Y-%m-%d'),
                 end.strftime('%Y-%m-%d'),
-                limit=days
+                limit=days,
+                feed='iex'  # Données gratuites IEX
             )
             
             data = []

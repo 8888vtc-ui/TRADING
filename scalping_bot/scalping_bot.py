@@ -214,7 +214,8 @@ class ScalpingBot:
             bars = self.api.get_bars(
                 symbol,
                 timeframe,
-                limit=limit
+                limit=limit,
+                feed='iex'  # Données gratuites IEX
             ).df
             
             if bars.empty:
