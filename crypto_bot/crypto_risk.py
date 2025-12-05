@@ -1,5 +1,5 @@
 """
-🛡️ CRYPTO RISK MANAGER V2.0
+🛡️ CRYPTO RISK MANAGER V2.0 - PROTECTION DU CAPITAL
 """
 import pandas as pd
 import numpy as np

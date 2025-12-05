@@ -1,5 +1,5 @@
 """
-🚀 LEVERAGE MANAGER V2.0 - AVEC SCORING UNIFIÉ
+🚀 LEVERAGE MANAGER V2.0 - PROTECTION DU CAPITAL
 """
 import logging
 from typing import Dict
