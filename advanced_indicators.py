@@ -373,30 +373,28 @@ def calculate_cmf(df: pd.DataFrame, period: int = 20) -> Dict:
         close = df['close']
         volume = df['volume']
         
-        # Money Flow Multiplier (protection div/0)
+        # Money Flow Multiplier (VECTORISÉ - protection div/0)
         hl_range = high - low
-        mfm = pd.Series(index=df.index, dtype=float)
-        
-        for i in range(len(df)):
-            if hl_range.iloc[i] == 0:
-                mfm.iloc[i] = 0
-            else:
-                mfm.iloc[i] = ((close.iloc[i] - low.iloc[i]) - (high.iloc[i] - close.iloc[i])) / hl_range.iloc[i]
+        mfm = np.where(
+            (hl_range != 0) & (~hl_range.isna()),
+            ((close - low) - (high - close)) / hl_range,
+            0
+        )
+        mfm = pd.Series(mfm, index=df.index)
         
         # Money Flow Volume
         mfv = mfm * volume
         
-        # CMF
-        cmf_values = []
-        for i in range(len(df)):
-            if i < period - 1:
-                cmf_values.append(0)
-            else:
-                sum_mfv = mfv.iloc[i-period+1:i+1].sum()
-                sum_vol = volume.iloc[i-period+1:i+1].sum()
-                cmf_values.append(safe_divide(sum_mfv, sum_vol, 0))
+        # CMF (rolling sum - plus efficace)
+        sum_mfv = mfv.rolling(window=period).sum()
+        sum_vol = volume.rolling(window=period).sum()
         
-        df_cmf = pd.Series(cmf_values, index=df.index)
+        df_cmf = np.where(
+            (sum_vol != 0) & (~sum_vol.isna()),
+            sum_mfv / sum_vol,
+            0
+        )
+        df_cmf = pd.Series(df_cmf, index=df.index).fillna(0)
         current_cmf = df_cmf.iloc[-1]
         prev_cmf = df_cmf.iloc[-2] if len(df_cmf) > 1 else current_cmf
         

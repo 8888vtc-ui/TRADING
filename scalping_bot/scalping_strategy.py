@@ -118,22 +118,24 @@ class ScalpingStrategy:
         self.news_bonus = 1.0
         
     def calculate_vwap(self, df: pd.DataFrame) -> pd.Series:
-        """VWAP avec protection division/0"""
+        """VWAP avec protection division/0 (VECTORISÉ)"""
         df = df.copy()
         tp = (df['high'] + df['low'] + df['close']) / 3
         tp_vol = tp * df['volume']
         cum_tp_vol = tp_vol.cumsum()
         cum_vol = df['volume'].cumsum()
         
-        # Protection
-        vwap = pd.Series(index=df.index, dtype=float)
-        for i in range(len(df)):
-            vwap.iloc[i] = safe_divide(cum_tp_vol.iloc[i], cum_vol.iloc[i], df['close'].iloc[i])
+        # Protection VECTORISÉE (pas de boucle)
+        vwap = np.where(
+            (cum_vol != 0) & (~cum_vol.isna()),
+            cum_tp_vol / cum_vol,
+            df['close']
+        )
         
-        return clean_series(vwap, df['close'].mean())
+        return clean_series(pd.Series(vwap, index=df.index), df['close'].mean())
     
     def calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Calcule tous les indicateurs avec protection complète"""
+        """Calcule tous les indicateurs avec protection complète (VECTORISÉ - Sans warnings)"""
         df = df.copy()
         
         if len(df) < 50:
@@ -146,16 +148,18 @@ class ScalpingStrategy:
             df['ema_9'] = EMAIndicator(df['close'], window=self.ema_fast).ema_indicator()
             df['ema_21'] = EMAIndicator(df['close'], window=self.ema_slow).ema_indicator()
             
-            # Pentes EMA (protection)
+            # Pentes EMA (VECTORISÉ)
             ema9_shift = df['ema_9'].shift(3)
             ema21_shift = df['ema_21'].shift(3)
-            df['ema_9_slope'] = clean_series(
-                pd.Series([safe_divide(df['ema_9'].iloc[i] - ema9_shift.iloc[i], ema9_shift.iloc[i], 0) * 100 
-                          for i in range(len(df))], index=df.index)
+            df['ema_9_slope'] = np.where(
+                (ema9_shift != 0) & (~ema9_shift.isna()),
+                ((df['ema_9'] - ema9_shift) / ema9_shift) * 100,
+                0
             )
-            df['ema_21_slope'] = clean_series(
-                pd.Series([safe_divide(df['ema_21'].iloc[i] - ema21_shift.iloc[i], ema21_shift.iloc[i], 0) * 100 
-                          for i in range(len(df))], index=df.index)
+            df['ema_21_slope'] = np.where(
+                (ema21_shift != 0) & (~ema21_shift.isna()),
+                ((df['ema_21'] - ema21_shift) / ema21_shift) * 100,
+                0
             )
             
             # 2. RSI
@@ -167,26 +171,27 @@ class ScalpingStrategy:
             df['stoch_k'] = clean_series(stoch.stoch(), 50)
             df['stoch_d'] = clean_series(stoch.stoch_signal(), 50)
             
-            # 4. Bollinger (PROTECTION CRITIQUE)
+            # 4. Bollinger (VECTORISÉ - SANS BOUCLE)
             bb = BollingerBands(df['close'], window=self.bb_period, window_dev=self.bb_std)
             df['bb_upper'] = bb.bollinger_hband()
             df['bb_middle'] = bb.bollinger_mavg()
             df['bb_lower'] = bb.bollinger_lband()
             
-            # bb_position avec protection
+            # bb_position VECTORISÉ avec clamp
             bb_range = df['bb_upper'] - df['bb_lower']
-            df['bb_position'] = pd.Series(index=df.index, dtype=float)
-            for i in range(len(df)):
-                df['bb_position'].iloc[i] = clamp(
-                    safe_divide(df['close'].iloc[i] - df['bb_lower'].iloc[i], bb_range.iloc[i], 0.5),
-                    0, 1
-                )
+            raw_bb_pos = np.where(
+                (bb_range != 0) & (~bb_range.isna()),
+                (df['close'] - df['bb_lower']) / bb_range,
+                0.5
+            )
+            df['bb_position'] = np.clip(raw_bb_pos, 0, 1)
             
             # 5. VWAP
             df['vwap'] = self.calculate_vwap(df)
-            df['vwap_distance'] = pd.Series(
-                [safe_divide(df['close'].iloc[i] - df['vwap'].iloc[i], df['vwap'].iloc[i], 0) * 100 
-                 for i in range(len(df))], index=df.index
+            df['vwap_distance'] = np.where(
+                (df['vwap'] != 0) & (~df['vwap'].isna()),
+                ((df['close'] - df['vwap']) / df['vwap']) * 100,
+                0
             )
             
             # 6. ADX
@@ -201,21 +206,23 @@ class ScalpingStrategy:
             df['macd_signal'] = clean_series(macd.macd_signal())
             df['macd_hist'] = clean_series(macd.macd_diff())
             
-            # 8. Volume (protection)
+            # 8. Volume (VECTORISÉ)
             df['volume_sma'] = df['volume'].rolling(self.volume_sma_period).mean().fillna(df['volume'].mean())
-            df['volume_ratio'] = pd.Series(
-                [safe_divide(df['volume'].iloc[i], df['volume_sma'].iloc[i], 1.0) 
-                 for i in range(len(df))], index=df.index
+            df['volume_ratio'] = np.where(
+                (df['volume_sma'] != 0) & (~df['volume_sma'].isna()),
+                df['volume'] / df['volume_sma'],
+                1.0
             )
             
-            # 9. ATR
+            # 9. ATR (VECTORISÉ)
             df['atr'] = clean_series(
                 AverageTrueRange(df['high'], df['low'], df['close'], window=14).average_true_range(),
                 df['close'].std() if len(df) > 0 else 1
             )
-            df['atr_pct'] = pd.Series(
-                [safe_divide(df['atr'].iloc[i], df['close'].iloc[i], 0.01) * 100 
-                 for i in range(len(df))], index=df.index
+            df['atr_pct'] = np.where(
+                (df['close'] != 0) & (~df['close'].isna()),
+                (df['atr'] / df['close']) * 100,
+                1.0
             )
             
         except Exception as e:

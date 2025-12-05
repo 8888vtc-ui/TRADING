@@ -130,9 +130,12 @@ class TradingStrategy:
             return pd.DataFrame()
     
     def calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Calcule tous les indicateurs avec protection division/0"""
+        """Calcule tous les indicateurs avec protection division/0 (VECTORISÉ - Sans warnings)"""
         if len(df) < 50:
             return df
+        
+        # Force une copie explicite pour éviter les SettingWithCopyWarning
+        df = df.copy()
         
         try:
             # RSI
@@ -156,15 +159,13 @@ class TradingStrategy:
             df['bb_middle'] = bollinger.bollinger_mavg()
             df['bb_lower'] = bollinger.bollinger_lband()
             
-            # Position BB avec protection division/0
+            # Position BB avec protection division/0 (VECTORISÉ - pas de boucle)
             bb_range = df['bb_upper'] - df['bb_lower']
-            df['bb_position'] = pd.Series(index=df.index, dtype=float)
-            for i in range(len(df)):
-                df['bb_position'].iloc[i] = safe_divide(
-                    df['close'].iloc[i] - df['bb_lower'].iloc[i],
-                    bb_range.iloc[i],
-                    0.5
-                )
+            df['bb_position'] = np.where(
+                (bb_range != 0) & (~bb_range.isna()),
+                (df['close'] - df['bb_lower']) / bb_range,
+                0.5
+            )
             
             # ATR
             df['atr'] = clean_series(
@@ -172,21 +173,25 @@ class TradingStrategy:
                 df['close'].std()
             )
             
-            # ATR en pourcentage (protection)
-            df['atr_pct'] = pd.Series(index=df.index, dtype=float)
-            for i in range(len(df)):
-                df['atr_pct'].iloc[i] = safe_divide(df['atr'].iloc[i], df['close'].iloc[i], 0.02) * 100
+            # ATR en pourcentage (VECTORISÉ - pas de boucle)
+            df['atr_pct'] = np.where(
+                (df['close'] != 0) & (~df['close'].isna()),
+                (df['atr'] / df['close']) * 100,
+                2.0
+            )
             
             # Stochastic
             stoch = ta.momentum.StochasticOscillator(df['high'], df['low'], df['close'], window=14, smooth_window=3)
             df['stoch_k'] = clean_series(stoch.stoch(), 50)
             df['stoch_d'] = clean_series(stoch.stoch_signal(), 50)
             
-            # Volume SMA avec protection
+            # Volume SMA avec protection (VECTORISÉ - pas de boucle)
             df['volume_sma'] = df['volume'].rolling(window=20).mean().fillna(df['volume'].mean())
-            df['volume_ratio'] = pd.Series(index=df.index, dtype=float)
-            for i in range(len(df)):
-                df['volume_ratio'].iloc[i] = safe_divide(df['volume'].iloc[i], df['volume_sma'].iloc[i], 1.0)
+            df['volume_ratio'] = np.where(
+                (df['volume_sma'] != 0) & (~df['volume_sma'].isna()),
+                df['volume'] / df['volume_sma'],
+                1.0
+            )
             
         except Exception as e:
             logger.error(f"Erreur calcul indicateurs: {e}")

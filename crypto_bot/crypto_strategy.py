@@ -144,13 +144,14 @@ class CryptoStrategy:
             df['bb_lower'] = bb.bollinger_lband()
             df['bb_mid'] = bb.bollinger_mavg()
             
-            # BB Position (protection div/0)
+            # BB Position (VECTORISÉ - protection div/0)
             bb_range = df['bb_upper'] - df['bb_lower']
-            df['bb_position'] = pd.Series(index=df.index, dtype=float)
-            for i in range(len(df)):
-                df['bb_position'].iloc[i] = max(0, min(1, 
-                    safe_divide(df['close'].iloc[i] - df['bb_lower'].iloc[i], bb_range.iloc[i], 0.5)
-                ))
+            raw_bb_pos = np.where(
+                (bb_range != 0) & (~bb_range.isna()),
+                (df['close'] - df['bb_lower']) / bb_range,
+                0.5
+            )
+            df['bb_position'] = np.clip(raw_bb_pos, 0, 1)
             
             # ADX
             adx = ADXIndicator(df['high'], df['low'], df['close'], window=self.adx_period)
@@ -163,20 +164,22 @@ class CryptoStrategy:
             df['stoch_k'] = clean_series(stoch.stoch(), 50)
             df['stoch_d'] = clean_series(stoch.stoch_signal(), 50)
             
-            # ATR
+            # ATR (VECTORISÉ)
             df['atr'] = clean_series(
                 AverageTrueRange(df['high'], df['low'], df['close'], window=14).average_true_range()
             )
-            df['atr_pct'] = pd.Series(
-                [safe_divide(df['atr'].iloc[i], df['close'].iloc[i], 0.02) * 100 for i in range(len(df))],
-                index=df.index
+            df['atr_pct'] = np.where(
+                (df['close'] != 0) & (~df['close'].isna()),
+                (df['atr'] / df['close']) * 100,
+                2.0
             )
             
-            # Volume
+            # Volume (VECTORISÉ)
             df['volume_sma'] = df['volume'].rolling(20).mean().fillna(df['volume'].mean())
-            df['volume_ratio'] = pd.Series(
-                [safe_divide(df['volume'].iloc[i], df['volume_sma'].iloc[i], 1) for i in range(len(df))],
-                index=df.index
+            df['volume_ratio'] = np.where(
+                (df['volume_sma'] != 0) & (~df['volume_sma'].isna()),
+                df['volume'] / df['volume_sma'],
+                1.0
             )
             
             # Momentum (ROC)
