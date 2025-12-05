@@ -1,0 +1,27 @@
+# Alpaca API Keys - NE JAMAIS COMMITER !
+alpaca_api_keys.env
+.env
+*.env
+.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
