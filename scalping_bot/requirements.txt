@@ -1,0 +1,20 @@
+# Bot de Scalping NASDAQ - Dépendances
+# =====================================
+
+# API Alpaca
+alpaca-trade-api>=3.0.0
+
+# Variables d'environnement
+python-dotenv>=1.0.0
+
+# Analyse technique
+ta>=0.11.0
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Scheduling
+schedule>=1.2.0
+
+# Timezone
+pytz>=2023.3
+
