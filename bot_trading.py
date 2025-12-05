@@ -106,6 +106,7 @@ class TradingBot:
         
         # Market Intelligence
         self.risk_multiplier = 1.0  # Ajusté par Market Intelligence
+        self.hold_multiplier = 1.0  # Multiplicateur de durée de position
         
         # État du bot
         self.is_running = True
@@ -216,9 +217,12 @@ class TradingBot:
             
             # Ajuster le risque selon les conditions
             self.risk_multiplier = market_analysis['max_risk_multiplier']
+            self.hold_multiplier = market_analysis.get('hold_multiplier', 1.0)
+            
             logger.info(f"🧠 Market Intelligence: Score {market_analysis['score']}/100")
             logger.info(f"   {market_analysis['recommendation']}")
             logger.info(f"   Multiplicateur risque: {self.risk_multiplier}x")
+            logger.info(f"   📍 Hold: {self.hold_multiplier}x - {market_analysis.get('hold_reason', '')}")
         except Exception as e:
             logger.warning(f"⚠️ Market Intelligence indisponible: {e}")
             self.risk_multiplier = 1.0
@@ -256,6 +260,9 @@ class TradingBot:
     
     def _analyze_and_trade(self, symbol):
         """Analyse un symbole et exécute un trade si nécessaire"""
+        # Passer le hold_multiplier à la stratégie
+        self.strategy.hold_multiplier = self.hold_multiplier
+        
         # Analyser le symbole
         signal = self.strategy.analyze(symbol)
         

@@ -248,12 +248,39 @@ class MarketIntelligence:
             recommendation = "🔴 CONDITIONS DÉFAVORABLES"
             max_risk_multiplier = 0.0
         
+        # ═══════════════════════════════════════════════════════════
+        # Décision de durée de position (HOLD LONGER)
+        # ═══════════════════════════════════════════════════════════
+        hold_multiplier = 1.0  # Base
+        hold_reason = "Normal"
+        
+        # Si marché très bullish, on garde plus longtemps
+        if score >= 70:
+            hold_multiplier = 2.0  # Take profit 2x plus loin
+            hold_reason = "🚀 Marché porteur - Laisser courir les gains!"
+        elif score >= 55:
+            hold_multiplier = 1.5  # Take profit 50% plus loin
+            hold_reason = "📈 Tendance positive - Prolonger les positions"
+        elif score <= 35:
+            hold_multiplier = 0.5  # Take profit plus serré
+            hold_reason = "⚠️ Marché risqué - Prendre les profits rapidement"
+        
+        # Ajuster selon momentum du marché
+        if mc_change > 3:
+            hold_multiplier *= 1.3
+            hold_reason += " | Momentum fort"
+        elif mc_change < -2:
+            hold_multiplier *= 0.7
+            hold_reason += " | Momentum faible"
+        
         result = {
             'score': score,
             'can_trade': can_trade,
             'can_leverage': can_leverage,
             'recommendation': recommendation,
             'max_risk_multiplier': max_risk_multiplier,
+            'hold_multiplier': hold_multiplier,  # NOUVEAU: Multiplicateur de durée
+            'hold_reason': hold_reason,          # NOUVEAU: Raison
             'warnings': warnings,
             'signals': signals,
             'data': {
@@ -270,6 +297,7 @@ class MarketIntelligence:
         logger.info(f"   {recommendation}")
         logger.info(f"   Peut trader: {'✅' if can_trade else '❌'}")
         logger.info(f"   Peut leverage: {'✅' if can_leverage else '❌'}")
+        logger.info(f"   📍 Hold: {hold_multiplier}x - {hold_reason}")
         for w in warnings[:3]:
             logger.info(f"   {w}")
         for s in signals[:3]:

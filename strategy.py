@@ -342,17 +342,27 @@ class TradingStrategy:
             pct_stop = close * (1 - stop_pct)
             result['stop_loss'] = max(atr_stop, pct_stop)
             
-            # Take profit adaptatif
-            tp_pct = stop_pct * 3  # Ratio 1:3
+            # Take profit adaptatif (ajusté selon conditions marché)
+            # hold_multiplier est passé depuis le bot principal
+            hold_mult = getattr(self, 'hold_multiplier', 1.0)
+            
+            tp_pct = stop_pct * 3 * hold_mult  # Ratio 1:3 * hold_multiplier
             result['take_profit'] = close * (1 + tp_pct)
             
-            # Niveaux de take profit progressif
+            # Niveaux de take profit progressif (ajustés selon marché)
+            # Si marché porteur (hold_mult > 1), on laisse courir plus longtemps
+            base_levels = [5, 10, 15, 20]
+            adjusted_levels = [l * hold_mult for l in base_levels]
+            
             result['take_profit_levels'] = [
-                {'pct': 5, 'price': close * 1.05, 'sell': 0.25},
-                {'pct': 10, 'price': close * 1.10, 'sell': 0.25},
-                {'pct': 15, 'price': close * 1.15, 'sell': 0.25},
-                {'pct': 20, 'price': close * 1.20, 'sell': 1.0},
+                {'pct': adjusted_levels[0], 'price': close * (1 + adjusted_levels[0]/100), 'sell': 0.20},
+                {'pct': adjusted_levels[1], 'price': close * (1 + adjusted_levels[1]/100), 'sell': 0.25},
+                {'pct': adjusted_levels[2], 'price': close * (1 + adjusted_levels[2]/100), 'sell': 0.25},
+                {'pct': adjusted_levels[3], 'price': close * (1 + adjusted_levels[3]/100), 'sell': 1.0},
             ]
+            
+            if hold_mult > 1:
+                logger.info(f"   📍 Hold {hold_mult}x: TP ajustés à {adjusted_levels[0]:.0f}%/{adjusted_levels[1]:.0f}%/{adjusted_levels[2]:.0f}%/{adjusted_levels[3]:.0f}%")
             
             logger.info(f"🎯 SIGNAL {symbol}: Score {score} | Stop {stop_pct*100:.1f}%")
         
