@@ -234,8 +234,12 @@ class MarketIntelligence:
         # ═══════════════════════════════════════════════════════════
         can_trade = score >= 35
         can_leverage = score >= 60
+        force_max_leverage = score >= 80  # NOUVEAU: Forcer leverage MAX si super marché
         
-        if score >= 70:
+        if score >= 80:
+            recommendation = "🔥🔥🔥 CONDITIONS EXCEPTIONNELLES - LEVERAGE MAX!"
+            max_risk_multiplier = 2.0
+        elif score >= 70:
             recommendation = "🟢 CONDITIONS EXCELLENTES"
             max_risk_multiplier = 1.5
         elif score >= 50:
@@ -277,10 +281,11 @@ class MarketIntelligence:
             'score': score,
             'can_trade': can_trade,
             'can_leverage': can_leverage,
+            'force_max_leverage': force_max_leverage,  # NOUVEAU: Forcer leverage MAX
             'recommendation': recommendation,
             'max_risk_multiplier': max_risk_multiplier,
-            'hold_multiplier': hold_multiplier,  # NOUVEAU: Multiplicateur de durée
-            'hold_reason': hold_reason,          # NOUVEAU: Raison
+            'hold_multiplier': hold_multiplier,
+            'hold_reason': hold_reason,
             'warnings': warnings,
             'signals': signals,
             'data': {
@@ -297,6 +302,8 @@ class MarketIntelligence:
         logger.info(f"   {recommendation}")
         logger.info(f"   Peut trader: {'✅' if can_trade else '❌'}")
         logger.info(f"   Peut leverage: {'✅' if can_leverage else '❌'}")
+        if force_max_leverage:
+            logger.info(f"   🔥🔥🔥 LEVERAGE MAX FORCÉ! Marché exceptionnellement favorable!")
         logger.info(f"   📍 Hold: {hold_multiplier}x - {hold_reason}")
         for w in warnings[:3]:
             logger.info(f"   {w}")

@@ -27,6 +27,11 @@ class CryptoRiskManager:
         self.last_loss_time = None
         self.positions = {}
         self.allowed_cryptos = ['BTC/USD', 'ETH/USD', 'SOL/USD']
+        self.market_score = 50  # Score Market Intelligence
+    
+    def set_market_score(self, score: int):
+        """Met à jour le score du marché"""
+        self.market_score = score
     
     def get_account_info(self):
         try:
@@ -49,13 +54,20 @@ class CryptoRiskManager:
         if len(positions) >= self.max_positions: return {'can_trade': False, 'reason': 'Max', 'max_position_value': 0}
         for p in positions:
             if symbol.replace('/', '') in p['symbol']: return {'can_trade': False, 'reason': 'Déjà', 'max_position_value': 0}
-        max_pos = pv * self.max_per_crypto.get(symbol, 0.20) * (1.2 if confidence >= 85 else 1)
+        
+        # BOOST si marché super
+        market_mult = 1.3 if self.market_score >= 80 else 1.2 if self.market_score >= 70 else 1.0
+        max_pos = pv * self.max_per_crypto.get(symbol, 0.20) * (1.2 if confidence >= 85 else 1) * market_mult
         return {'can_trade': True, 'reason': 'OK', 'max_position_value': max_pos}
     
     def calculate_position_size(self, symbol, price, stop_loss, confidence):
         check = self.can_trade(symbol, confidence)
         if not check['can_trade']: return {'qty': 0, 'reason': check['reason'], 'can_trade': False}
-        risk = self.get_account_info()['portfolio_value'] * self.risk_per_trade * (1.5 if confidence >= 90 else 1.2 if confidence >= 80 else 1)
+        
+        # BOOST risque si marché super
+        market_mult = 1.5 if self.market_score >= 80 else 1.2 if self.market_score >= 70 else 1.0
+        risk = self.get_account_info()['portfolio_value'] * self.risk_per_trade * (1.5 if confidence >= 90 else 1.2 if confidence >= 80 else 1) * market_mult
+        
         stop_pct = safe_divide(abs(price - stop_loss), price, 0.02)
         qty = safe_divide(min(safe_divide(risk, stop_pct, 0), check['max_position_value']), price, 0)
         if symbol == 'BTC/USD': qty = round(qty, 4)
@@ -75,7 +87,7 @@ class CryptoRiskManager:
         a = self.get_account_info()
         p = self.get_positions()
         e = sum(x['market_value'] for x in p)
-        return {'portfolio_value': a['portfolio_value'], 'cash': a['cash'], 'cash_ratio': a['cash_ratio']*100, 'num_positions': len(p), 'max_positions': self.max_positions, 'exposure': e, 'exposure_pct': safe_divide(e, a['portfolio_value'], 0)*100, 'unrealized_pnl': sum(x['unrealized_pl'] for x in p), 'daily_pnl': self.daily_pnl, 'daily_trades': self.daily_trades, 'consecutive_losses': self.consecutive_losses, 'positions': p}
+        return {'portfolio_value': a['portfolio_value'], 'cash': a['cash'], 'cash_ratio': a['cash_ratio']*100, 'num_positions': len(p), 'max_positions': self.max_positions, 'exposure': e, 'exposure_pct': safe_divide(e, a['portfolio_value'], 0)*100, 'unrealized_pnl': sum(x['unrealized_pl'] for x in p), 'daily_pnl': self.daily_pnl, 'daily_trades': self.daily_trades, 'consecutive_losses': self.consecutive_losses, 'positions': p, 'market_score': self.market_score}
     
     def check_all_exits(self, strategy):
         exits = []
