@@ -22,6 +22,14 @@
 
 Dans Railway, aller dans **Settings** → **Variables** et ajouter :
 
+**Option 1 (Recommandé - noms Alpaca officiels) :**
+```
+APCA_API_KEY_ID = PKQYJSXQ6NLKKHVUJHA4W3RJI4
+APCA_API_SECRET_KEY = AQUJqSXwrvtnpfXHVy7tn7qFSwWSWUUtnZPtRGLhhDw
+APCA_API_BASE_URL = https://paper-api.alpaca.markets
+```
+
+**Option 2 (Noms alternatifs - le code les mappe automatiquement) :**
 ```
 ALPACA_API_KEY = PKQYJSXQ6NLKKHVUJHA4W3RJI4
 ALPACA_SECRET_KEY = AQUJqSXwrvtnpfXHVy7tn7qFSwWSWUUtnZPtRGLhhDw

@@ -30,10 +30,19 @@ logger = logging.getLogger(__name__)
 # Charger les variables d'environnement
 load_dotenv('alpaca_api_keys.env')
 
-# Configuration
-API_KEY = os.getenv('ALPACA_API_KEY')
-SECRET_KEY = os.getenv('ALPACA_SECRET_KEY')
-BASE_URL = os.getenv('ALPACA_BASE_URL', 'https://paper-api.alpaca.markets')
+# Configuration - Support des deux formats de noms
+API_KEY = os.getenv('ALPACA_API_KEY') or os.getenv('APCA_API_KEY_ID')
+SECRET_KEY = os.getenv('ALPACA_SECRET_KEY') or os.getenv('APCA_API_SECRET_KEY')
+BASE_URL = os.getenv('ALPACA_BASE_URL') or os.getenv('APCA_API_BASE_URL', 'https://paper-api.alpaca.markets')
+
+# Définir les variables avec les noms attendus par la bibliothèque Alpaca
+# La bibliothèque cherche APCA_API_KEY_ID, APCA_API_SECRET_KEY, etc.
+if API_KEY:
+    os.environ['APCA_API_KEY_ID'] = API_KEY
+if SECRET_KEY:
+    os.environ['APCA_API_SECRET_KEY'] = SECRET_KEY
+if BASE_URL:
+    os.environ['APCA_API_BASE_URL'] = BASE_URL
 
 # Timezone
 NY_TZ = pytz.timezone('America/New_York')
