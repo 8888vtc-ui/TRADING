@@ -27,22 +27,42 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Charger les variables d'environnement
+# Charger les variables d'environnement (pour local)
 load_dotenv('alpaca_api_keys.env')
+
+# Debug: Afficher les variables disponibles
+print("🔍 DEBUG - Variables d'environnement Alpaca:")
+print(f"   ALPACA_API_KEY: {os.getenv('ALPACA_API_KEY', 'NON DÉFINIE')[:20] if os.getenv('ALPACA_API_KEY') else 'NON DÉFINIE'}...")
+print(f"   ALPACA_SECRET_KEY: {'DÉFINIE' if os.getenv('ALPACA_SECRET_KEY') else 'NON DÉFINIE'}")
+print(f"   APCA_API_KEY_ID: {os.getenv('APCA_API_KEY_ID', 'NON DÉFINIE')[:20] if os.getenv('APCA_API_KEY_ID') else 'NON DÉFINIE'}...")
+print(f"   APCA_API_SECRET_KEY: {'DÉFINIE' if os.getenv('APCA_API_SECRET_KEY') else 'NON DÉFINIE'}")
 
 # Configuration - Support des deux formats de noms
 API_KEY = os.getenv('ALPACA_API_KEY') or os.getenv('APCA_API_KEY_ID')
 SECRET_KEY = os.getenv('ALPACA_SECRET_KEY') or os.getenv('APCA_API_SECRET_KEY')
-BASE_URL = os.getenv('ALPACA_BASE_URL') or os.getenv('APCA_API_BASE_URL', 'https://paper-api.alpaca.markets')
+BASE_URL = os.getenv('ALPACA_BASE_URL') or os.getenv('APCA_API_BASE_URL') or 'https://paper-api.alpaca.markets'
+
+print(f"   API_KEY final: {'DÉFINIE' if API_KEY else 'NON DÉFINIE'}")
+print(f"   SECRET_KEY final: {'DÉFINIE' if SECRET_KEY else 'NON DÉFINIE'}")
+print(f"   BASE_URL final: {BASE_URL}")
+
+# Vérifier que les clés sont présentes
+if not API_KEY:
+    print("❌ ERREUR: Aucune clé API trouvée!")
+    print("   Configurez ALPACA_API_KEY ou APCA_API_KEY_ID dans Railway")
+    raise ValueError("ALPACA_API_KEY ou APCA_API_KEY_ID requis")
+
+if not SECRET_KEY:
+    print("❌ ERREUR: Aucune clé secrète trouvée!")
+    print("   Configurez ALPACA_SECRET_KEY ou APCA_API_SECRET_KEY dans Railway")
+    raise ValueError("ALPACA_SECRET_KEY ou APCA_API_SECRET_KEY requis")
 
 # Définir les variables avec les noms attendus par la bibliothèque Alpaca
-# La bibliothèque cherche APCA_API_KEY_ID, APCA_API_SECRET_KEY, etc.
-if API_KEY:
-    os.environ['APCA_API_KEY_ID'] = API_KEY
-if SECRET_KEY:
-    os.environ['APCA_API_SECRET_KEY'] = SECRET_KEY
-if BASE_URL:
-    os.environ['APCA_API_BASE_URL'] = BASE_URL
+os.environ['APCA_API_KEY_ID'] = API_KEY
+os.environ['APCA_API_SECRET_KEY'] = SECRET_KEY
+os.environ['APCA_API_BASE_URL'] = BASE_URL
+
+print("✅ Variables configurées pour Alpaca API")
 
 # Timezone
 NY_TZ = pytz.timezone('America/New_York')
