@@ -1,396 +1,388 @@
 """
-🛡️ GESTIONNAIRE DE RISQUE SCALPING V2.1
+🛡️ GESTIONNAIRE DE RISQUE SCALPING V3.0
 ========================================
-Version: 2.1 - Avec corrections division par zéro
-Auteur: Trading Bot System
+Version: 3.0 - Protection maximale
 Date: Décembre 2024
 
-CORRECTIONS V2.1:
-- Protection contre division par zéro dans tous les calculs
-- Gestion des valeurs NaN/Inf
-- Validation des entrées
-
-RÈGLES:
-- Max 0.5% de risque par trade
-- Max 2% de perte journalière
-- Max 5 trades perdants consécutifs = STOP
-- Position sizing dynamique basé sur volatilité
+AMÉLIORATIONS:
+✅ Protection division par zéro complète
+✅ Validation de toutes les entrées
+✅ Limites de position par secteur
+✅ Suivi détaillé des performances
 """
 
 import logging
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict, List, Optional
 import pytz
 import numpy as np
+import sys
+import os
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+try:
+    from shared_utils import safe_divide, get_sector, count_positions_by_sector
+except ImportError:
+    def safe_divide(n, d, default=0.0):
+        try:
+            if d == 0: return default
+            r = n / d
+            return default if np.isnan(r) or np.isinf(r) else r
+        except: return default
+    
+    def get_sector(s): return 'unknown'
+    def count_positions_by_sector(p): return {}
 
 logger = logging.getLogger(__name__)
-
 NY_TZ = pytz.timezone('America/New_York')
-
-
-def safe_divide(numerator, denominator, default=0.0):
-    """Division sécurisée"""
-    try:
-        if denominator == 0 or np.isnan(denominator) or np.isinf(denominator):
-            return default
-        result = numerator / denominator
-        if np.isnan(result) or np.isinf(result):
-            return default
-        return result
-    except:
-        return default
 
 
 class ScalpingRiskManager:
     """
-    Gestionnaire de Risque pour Scalping V2.1
-    =========================================
-    Optimisé avec protection contre erreurs numériques
+    Gestionnaire de Risque Scalping V3.0
+    ====================================
     """
     
     def __init__(self, initial_capital: float = 100000):
-        # Validation du capital
+        # Validation
         if initial_capital <= 0 or np.isnan(initial_capital):
             initial_capital = 100000
-            logger.warning("Capital invalide, utilisation de $100,000 par défaut")
+            logger.warning("Capital invalide → $100,000")
         
-        # ═══════════════════════════════════════════════════════════
-        # CAPITAL & LIMITES
-        # ═══════════════════════════════════════════════════════════
         self.initial_capital = initial_capital
         self.current_capital = initial_capital
         
-        # Risque par trade
-        self.risk_per_trade_pct = 0.5
-        self.max_risk_per_trade_pct = 1.0
+        # ═══════════════════════════════════════════════════════════
+        # LIMITES DE RISQUE
+        # ═══════════════════════════════════════════════════════════
+        self.risk_per_trade = 0.005      # 0.5% par trade
+        self.max_risk_trade = 0.01       # 1% max absolu
         
-        # Limites journalières
-        self.max_daily_loss_pct = 2.0
-        self.max_daily_profit_pct = 5.0
-        self.max_trades_per_day = 20
-        self.max_consecutive_losses = 5
+        self.max_daily_loss = 0.02       # -2% max/jour
+        self.max_daily_profit = 0.05     # +5% objectif
+        self.max_trades_day = 20         # 20 trades max/jour
+        self.max_consecutive_loss = 5    # 5 pertes → stop
         
-        # Limites de position
-        self.max_position_pct = 10.0
-        self.max_positions = 3
-        self.max_exposure_pct = 25.0
+        self.max_position_pct = 0.10     # 10% max par position
+        self.max_positions = 3           # 3 positions max
+        self.max_exposure = 0.25         # 25% max exposé
+        self.max_per_sector = 2          # 2 positions max/secteur
         
         # ═══════════════════════════════════════════════════════════
-        # TRACKING JOURNALIER
+        # STATS JOURNALIÈRES
         # ═══════════════════════════════════════════════════════════
-        self.daily_stats = {
+        self.daily = {
             'date': None,
-            'starting_capital': initial_capital,
-            'trades_count': 0,
-            'winning_trades': 0,
-            'losing_trades': 0,
-            'consecutive_losses': 0,
+            'start_capital': initial_capital,
+            'trades': 0,
+            'wins': 0,
+            'losses': 0,
+            'consec_losses': 0,
             'pnl': 0.0,
             'pnl_pct': 0.0,
-            'max_drawdown': 0.0,
-            'best_trade': 0.0,
-            'worst_trade': 0.0
+            'best': 0.0,
+            'worst': 0.0,
+            'avg_win': 0.0,
+            'avg_loss': 0.0
         }
         
-        self.trade_history: List[Dict] = []
-        self.open_positions: Dict[str, Dict] = {}
-        
-        self.trading_allowed = True
+        self.positions: Dict[str, Dict] = {}
+        self.history: List[Dict] = []
+        self.trading_ok = True
         self.halt_reason = None
         
-    def reset_daily_stats(self):
-        """Reset les statistiques journalières"""
+        # Performance tracking
+        self.all_time_stats = {
+            'total_trades': 0,
+            'total_wins': 0,
+            'total_pnl': 0.0,
+            'best_day': 0.0,
+            'worst_day': 0.0
+        }
+    
+    def _reset_daily(self):
+        """Reset quotidien"""
         today = datetime.now(NY_TZ).date()
         
-        if self.daily_stats['date'] != today:
-            logger.info(f"📊 Reset stats journalières - {today}")
-            self.daily_stats = {
+        if self.daily['date'] != today:
+            # Sauvegarder stats du jour précédent
+            if self.daily['date'] is not None:
+                if self.daily['pnl'] > self.all_time_stats['best_day']:
+                    self.all_time_stats['best_day'] = self.daily['pnl']
+                if self.daily['pnl'] < self.all_time_stats['worst_day']:
+                    self.all_time_stats['worst_day'] = self.daily['pnl']
+            
+            logger.info(f"📊 Nouveau jour: {today}")
+            self.daily = {
                 'date': today,
-                'starting_capital': self.current_capital,
-                'trades_count': 0,
-                'winning_trades': 0,
-                'losing_trades': 0,
-                'consecutive_losses': 0,
+                'start_capital': self.current_capital,
+                'trades': 0,
+                'wins': 0,
+                'losses': 0,
+                'consec_losses': 0,
                 'pnl': 0.0,
                 'pnl_pct': 0.0,
-                'max_drawdown': 0.0,
-                'best_trade': 0.0,
-                'worst_trade': 0.0
+                'best': 0.0,
+                'worst': 0.0,
+                'avg_win': 0.0,
+                'avg_loss': 0.0
             }
-            self.trading_allowed = True
+            self.trading_ok = True
             self.halt_reason = None
     
-    def check_trading_allowed(self) -> tuple:
-        """Vérifie si le trading est autorisé"""
-        self.reset_daily_stats()
+    def can_trade(self) -> tuple:
+        """Vérifie si on peut trader"""
+        self._reset_daily()
         
-        # Perte journalière max
-        if self.daily_stats['pnl_pct'] <= -self.max_daily_loss_pct:
-            self.trading_allowed = False
-            self.halt_reason = f"Perte max atteinte ({self.daily_stats['pnl_pct']:.2f}%)"
+        # Perte max
+        if self.daily['pnl_pct'] <= -self.max_daily_loss * 100:
+            self.trading_ok = False
+            self.halt_reason = f"Perte max ({self.daily['pnl_pct']:.2f}%)"
             return False, self.halt_reason
         
-        # Nombre de trades
-        if self.daily_stats['trades_count'] >= self.max_trades_per_day:
-            self.trading_allowed = False
-            self.halt_reason = f"Max trades atteint ({self.max_trades_per_day})"
+        # Max trades
+        if self.daily['trades'] >= self.max_trades_day:
+            self.trading_ok = False
+            self.halt_reason = f"Max trades ({self.max_trades_day})"
             return False, self.halt_reason
         
         # Pertes consécutives
-        if self.daily_stats['consecutive_losses'] >= self.max_consecutive_losses:
-            self.trading_allowed = False
-            self.halt_reason = f"Pertes consécutives max ({self.max_consecutive_losses})"
+        if self.daily['consec_losses'] >= self.max_consecutive_loss:
+            self.trading_ok = False
+            self.halt_reason = f"Pertes consécutives ({self.max_consecutive_loss})"
             return False, self.halt_reason
         
-        # Positions ouvertes
-        if len(self.open_positions) >= self.max_positions:
+        # Max positions
+        if len(self.positions) >= self.max_positions:
             return False, f"Max positions ({self.max_positions})"
         
-        return True, "Trading autorisé"
+        return True, "OK"
     
-    def calculate_position_size(self, entry_price: float, stop_loss: float,
-                               symbol: str, volatility_pct: float = 1.0) -> dict:
-        """
-        Calcule la taille de position avec protection contre erreurs
-        """
-        # Validation des entrées
-        if entry_price <= 0 or np.isnan(entry_price):
-            return {'allowed': False, 'reason': 'Prix d\'entrée invalide', 'shares': 0}
+    def check_sector_limit(self, symbol: str) -> tuple:
+        """Vérifie la limite par secteur"""
+        sector = get_sector(symbol)
+        sector_count = 0
         
-        if stop_loss <= 0 or np.isnan(stop_loss):
-            return {'allowed': False, 'reason': 'Stop loss invalide', 'shares': 0}
+        for pos_symbol in self.positions.keys():
+            if get_sector(pos_symbol) == sector:
+                sector_count += 1
         
-        if stop_loss >= entry_price:
-            return {'allowed': False, 'reason': 'Stop loss >= prix entrée', 'shares': 0}
+        if sector_count >= self.max_per_sector:
+            return False, f"Max {self.max_per_sector} positions en {sector}"
+        
+        return True, "OK"
+    
+    def calculate_size(self, entry: float, stop: float, symbol: str, 
+                      volatility: float = 1.0) -> Dict:
+        """Calcule la taille de position"""
+        # Validations
+        if entry <= 0 or np.isnan(entry):
+            return {'ok': False, 'reason': 'Prix invalide', 'shares': 0}
+        if stop <= 0 or np.isnan(stop):
+            return {'ok': False, 'reason': 'Stop invalide', 'shares': 0}
+        if stop >= entry:
+            return {'ok': False, 'reason': 'Stop >= Prix', 'shares': 0}
         
         # Vérifier trading autorisé
-        allowed, reason = self.check_trading_allowed()
-        if not allowed:
-            return {'allowed': False, 'reason': reason, 'shares': 0}
+        ok, reason = self.can_trade()
+        if not ok:
+            return {'ok': False, 'reason': reason, 'shares': 0}
         
-        # Calculer le risque par action - PROTECTION DIVISION PAR ZÉRO
-        risk_per_share = abs(entry_price - stop_loss)
+        # Vérifier limite secteur
+        ok, reason = self.check_sector_limit(symbol)
+        if not ok:
+            return {'ok': False, 'reason': reason, 'shares': 0}
         
+        # Risque par action
+        risk_per_share = abs(entry - stop)
         if risk_per_share <= 0:
-            return {'allowed': False, 'reason': 'Risque par action = 0', 'shares': 0}
+            return {'ok': False, 'reason': 'Risque/action = 0', 'shares': 0}
         
-        # Ajuster le risque selon volatilité
-        adjusted_risk_pct = self.risk_per_trade_pct
-        if volatility_pct > 2.0:
-            adjusted_risk_pct *= 0.5
-        elif volatility_pct > 1.5:
-            adjusted_risk_pct *= 0.75
+        # Ajuster risque selon volatilité
+        risk_pct = self.risk_per_trade
+        if volatility > 2.5:
+            risk_pct *= 0.5
+        elif volatility > 1.5:
+            risk_pct *= 0.75
         
-        # Montant à risquer - PROTECTION
-        risk_amount = safe_divide(
-            self.current_capital * adjusted_risk_pct,
-            100,
-            self.current_capital * 0.005  # 0.5% par défaut
-        )
+        # Montant à risquer
+        risk_amount = self.current_capital * risk_pct
         
-        # Nombre d'actions - PROTECTION DIVISION PAR ZÉRO
+        # Nombre d'actions
         shares = int(safe_divide(risk_amount, risk_per_share, 0))
-        
         if shares < 1:
-            return {'allowed': False, 'reason': 'Position trop petite', 'shares': 0}
+            return {'ok': False, 'reason': 'Trop petit', 'shares': 0}
         
         # Vérifier taille max
-        position_value = shares * entry_price
-        max_position = safe_divide(
-            self.current_capital * self.max_position_pct,
-            100,
-            self.current_capital * 0.1
-        )
-        
-        if position_value > max_position:
-            shares = int(safe_divide(max_position, entry_price, 1))
-            position_value = shares * entry_price
+        value = shares * entry
+        max_value = self.current_capital * self.max_position_pct
+        if value > max_value:
+            shares = int(safe_divide(max_value, entry, 1))
+            value = shares * entry
         
         # Vérifier exposition totale
-        total_exposure = sum(
-            pos.get('value', 0) for pos in self.open_positions.values()
-        )
-        max_total_exposure = safe_divide(
-            self.current_capital * self.max_exposure_pct,
-            100,
-            self.current_capital * 0.25
-        )
-        remaining = max_total_exposure - total_exposure
+        total_exposure = sum(p.get('value', 0) for p in self.positions.values())
+        max_exposure = self.current_capital * self.max_exposure
+        remaining = max_exposure - total_exposure
         
-        if position_value > remaining:
-            shares = int(safe_divide(remaining, entry_price, 0))
-            position_value = shares * entry_price
+        if value > remaining:
+            shares = int(safe_divide(remaining, entry, 0))
+            if shares < 1:
+                return {'ok': False, 'reason': 'Exposition max', 'shares': 0}
+            value = shares * entry
         
-        if shares < 1:
-            return {'allowed': False, 'reason': 'Exposition max atteinte', 'shares': 0}
-        
-        # Calculer risque réel
         actual_risk = shares * risk_per_share
-        actual_risk_pct = safe_divide(actual_risk, self.current_capital, 0) * 100
-        position_pct = safe_divide(position_value, self.current_capital, 0) * 100
         
         return {
-            'allowed': True,
+            'ok': True,
             'symbol': symbol,
             'shares': shares,
-            'entry_price': entry_price,
-            'stop_loss': stop_loss,
-            'position_value': position_value,
-            'position_pct': position_pct,
-            'risk_amount': actual_risk,
-            'risk_pct': actual_risk_pct,
-            'risk_per_share': risk_per_share
+            'entry': entry,
+            'stop': stop,
+            'value': value,
+            'value_pct': safe_divide(value, self.current_capital, 0) * 100,
+            'risk': actual_risk,
+            'risk_pct': safe_divide(actual_risk, self.current_capital, 0) * 100
         }
     
-    def register_trade_entry(self, symbol: str, shares: int, entry_price: float,
-                            stop_loss: float, take_profit: float, signal_data: dict = None):
-        """Enregistre une nouvelle position"""
-        if shares <= 0 or entry_price <= 0:
-            logger.error(f"Entrée invalide: {symbol} shares={shares} price={entry_price}")
+    def open_position(self, symbol: str, shares: int, entry: float,
+                     stop: float, tp: float, data: Dict = None):
+        """Enregistre une position"""
+        if shares <= 0 or entry <= 0:
+            logger.error(f"Position invalide: {symbol}")
             return
         
-        position = {
+        self.positions[symbol] = {
             'symbol': symbol,
             'shares': shares,
-            'entry_price': entry_price,
-            'entry_time': datetime.now(NY_TZ),
-            'stop_loss': stop_loss,
-            'take_profit': take_profit,
-            'highest_price': entry_price,
-            'value': shares * entry_price,
-            'signal_data': signal_data or {}
+            'entry': entry,
+            'time': datetime.now(NY_TZ),
+            'stop': stop,
+            'tp': tp,
+            'highest': entry,
+            'value': shares * entry,
+            'data': data or {}
         }
         
-        self.open_positions[symbol] = position
-        self.daily_stats['trades_count'] += 1
+        self.daily['trades'] += 1
+        self.all_time_stats['total_trades'] += 1
         
-        logger.info(f"📈 Position ouverte: {symbol}")
-        logger.info(f"   Actions: {shares} @ ${entry_price:.2f}")
-        logger.info(f"   Valeur: ${position['value']:.2f}")
-        logger.info(f"   Stop: ${stop_loss:.2f} | TP: ${take_profit:.2f}")
+        logger.info(f"📈 OUVERT: {symbol} | {shares} @ ${entry:.2f}")
+        logger.info(f"   Stop: ${stop:.2f} | TP: ${tp:.2f}")
     
-    def register_trade_exit(self, symbol: str, exit_price: float,
-                           exit_reason: str = 'Manual') -> dict:
-        """Enregistre la sortie d'une position"""
-        if symbol not in self.open_positions:
+    def close_position(self, symbol: str, exit_price: float, reason: str = '') -> Dict:
+        """Ferme une position"""
+        if symbol not in self.positions:
             return {'error': 'Position non trouvée'}
         
-        position = self.open_positions[symbol]
-        shares = position['shares']
-        entry_price = position['entry_price']
+        pos = self.positions[symbol]
+        shares = pos['shares']
+        entry = pos['entry']
         
-        # Validation
-        if exit_price <= 0 or shares <= 0:
-            logger.error(f"Sortie invalide: {symbol}")
-            return {'error': 'Valeurs invalides'}
+        if exit_price <= 0:
+            return {'error': 'Prix invalide'}
         
-        # PnL - PROTECTION
-        pnl = (exit_price - entry_price) * shares
-        pnl_pct = safe_divide(exit_price - entry_price, entry_price, 0) * 100
+        # PnL
+        pnl = (exit_price - entry) * shares
+        pnl_pct = safe_divide(exit_price - entry, entry, 0) * 100
         
-        # Mise à jour stats
-        self.daily_stats['pnl'] += pnl
-        self.daily_stats['pnl_pct'] = safe_divide(
-            self.daily_stats['pnl'],
-            self.daily_stats['starting_capital'],
-            0
-        ) * 100
+        # Update stats
+        self.daily['pnl'] += pnl
+        self.daily['pnl_pct'] = safe_divide(self.daily['pnl'], self.daily['start_capital'], 0) * 100
+        self.all_time_stats['total_pnl'] += pnl
         
         if pnl > 0:
-            self.daily_stats['winning_trades'] += 1
-            self.daily_stats['consecutive_losses'] = 0
-            if pnl > self.daily_stats['best_trade']:
-                self.daily_stats['best_trade'] = pnl
+            self.daily['wins'] += 1
+            self.daily['consec_losses'] = 0
+            self.all_time_stats['total_wins'] += 1
+            if pnl > self.daily['best']:
+                self.daily['best'] = pnl
         else:
-            self.daily_stats['losing_trades'] += 1
-            self.daily_stats['consecutive_losses'] += 1
-            if pnl < self.daily_stats['worst_trade']:
-                self.daily_stats['worst_trade'] = pnl
+            self.daily['losses'] += 1
+            self.daily['consec_losses'] += 1
+            if pnl < self.daily['worst']:
+                self.daily['worst'] = pnl
         
         self.current_capital += pnl
         
         # Historique
-        trade_record = {
+        record = {
             'symbol': symbol,
-            'entry_price': entry_price,
-            'exit_price': exit_price,
+            'entry': entry,
+            'exit': exit_price,
             'shares': shares,
             'pnl': pnl,
             'pnl_pct': pnl_pct,
-            'entry_time': position['entry_time'],
+            'entry_time': pos['time'],
             'exit_time': datetime.now(NY_TZ),
-            'exit_reason': exit_reason,
-            'holding_time': datetime.now(NY_TZ) - position['entry_time']
+            'reason': reason,
+            'duration': datetime.now(NY_TZ) - pos['time']
         }
-        self.trade_history.append(trade_record)
+        self.history.append(record)
         
-        del self.open_positions[symbol]
+        del self.positions[symbol]
         
         emoji = "💰" if pnl > 0 else "📉"
-        logger.info(f"{emoji} Position fermée: {symbol}")
-        logger.info(f"   PnL: ${pnl:.2f} ({pnl_pct:+.2f}%)")
-        logger.info(f"   Capital: ${self.current_capital:.2f}")
+        logger.info(f"{emoji} FERMÉ: {symbol} | ${pnl:+.2f} ({pnl_pct:+.2f}%)")
         
-        return trade_record
+        return record
     
-    def update_position_price(self, symbol: str, current_price: float):
-        """Met à jour le highest price pour trailing stop"""
-        if symbol in self.open_positions and current_price > 0:
-            pos = self.open_positions[symbol]
-            if current_price > pos.get('highest_price', 0):
-                pos['highest_price'] = current_price
+    def update_highest(self, symbol: str, price: float):
+        """Update highest price pour trailing"""
+        if symbol in self.positions and price > 0:
+            if price > self.positions[symbol].get('highest', 0):
+                self.positions[symbol]['highest'] = price
     
-    def get_daily_summary(self) -> dict:
-        """Retourne les stats journalières"""
-        total = self.daily_stats['winning_trades'] + self.daily_stats['losing_trades']
-        win_rate = safe_divide(self.daily_stats['winning_trades'], total, 0) * 100
+    def get_summary(self) -> Dict:
+        """Résumé des stats"""
+        total = self.daily['wins'] + self.daily['losses']
+        win_rate = safe_divide(self.daily['wins'], total, 0) * 100
         
         return {
-            'date': self.daily_stats['date'],
-            'pnl': self.daily_stats['pnl'],
-            'pnl_pct': self.daily_stats['pnl_pct'],
-            'total_trades': total,
-            'winning_trades': self.daily_stats['winning_trades'],
-            'losing_trades': self.daily_stats['losing_trades'],
+            'date': self.daily['date'],
+            'pnl': self.daily['pnl'],
+            'pnl_pct': self.daily['pnl_pct'],
+            'trades': total,
+            'wins': self.daily['wins'],
+            'losses': self.daily['losses'],
             'win_rate': win_rate,
-            'consecutive_losses': self.daily_stats['consecutive_losses'],
-            'best_trade': self.daily_stats['best_trade'],
-            'worst_trade': self.daily_stats['worst_trade'],
-            'current_capital': self.current_capital,
-            'open_positions': len(self.open_positions),
-            'trading_allowed': self.trading_allowed
+            'consec_losses': self.daily['consec_losses'],
+            'best': self.daily['best'],
+            'worst': self.daily['worst'],
+            'capital': self.current_capital,
+            'positions': len(self.positions),
+            'trading_ok': self.trading_ok,
+            'all_time_pnl': self.all_time_stats['total_pnl'],
+            'all_time_trades': self.all_time_stats['total_trades'],
+            'all_time_win_rate': safe_divide(self.all_time_stats['total_wins'], 
+                                              self.all_time_stats['total_trades'], 0) * 100
         }
     
-    def print_daily_summary(self):
-        """Affiche le résumé journalier"""
-        s = self.get_daily_summary()
-        
-        logger.info("=" * 60)
-        logger.info("📊 RÉSUMÉ JOURNALIER SCALPING")
-        logger.info("=" * 60)
-        logger.info(f"   PnL: ${s['pnl']:.2f} ({s['pnl_pct']:+.2f}%)")
-        logger.info(f"   Trades: {s['total_trades']} (W:{s['winning_trades']} L:{s['losing_trades']})")
+    def print_summary(self):
+        """Affiche le résumé"""
+        s = self.get_summary()
+        logger.info("═" * 60)
+        logger.info("📊 RÉSUMÉ SCALPING")
+        logger.info("═" * 60)
+        logger.info(f"   PnL Jour: ${s['pnl']:+.2f} ({s['pnl_pct']:+.2f}%)")
+        logger.info(f"   Trades: {s['trades']} | Win: {s['wins']} | Loss: {s['losses']}")
         logger.info(f"   Win Rate: {s['win_rate']:.1f}%")
-        logger.info(f"   Capital: ${s['current_capital']:.2f}")
-        logger.info("=" * 60)
+        logger.info(f"   Capital: ${s['capital']:,.2f}")
+        logger.info(f"   All-Time PnL: ${s['all_time_pnl']:+.2f}")
+        logger.info("═" * 60)
 
 
-# Test
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    
     rm = ScalpingRiskManager(100000)
     
-    # Test avec valeurs normales
-    result = rm.calculate_position_size(150.0, 149.0, 'AAPL', 1.5)
-    print(f"✅ Test normal: {result['shares']} actions")
+    # Tests
+    r = rm.calculate_size(150, 149, 'AAPL', 1.5)
+    print(f"✅ Normal: {r['shares']} actions, risque ${r.get('risk', 0):.2f}")
     
-    # Test avec division par zéro
-    result = rm.calculate_position_size(150.0, 150.0, 'AAPL', 1.5)
-    print(f"✅ Test stop=entry: {result['reason']}")
+    r = rm.calculate_size(150, 150, 'TSLA', 1)
+    print(f"✅ Stop=Prix: {r['reason']}")
     
-    # Test avec prix invalide
-    result = rm.calculate_position_size(0, 149.0, 'AAPL', 1.5)
-    print(f"✅ Test prix=0: {result['reason']}")
-    
-    print("\n✅ Tous les tests de protection passés!")
+    r = rm.calculate_size(0, 149, 'AMD', 1)
+    print(f"✅ Prix=0: {r['reason']}")
