@@ -1,0 +1,2 @@
+# Crypto Hunter Bot Package
+
