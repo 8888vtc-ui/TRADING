@@ -1,11 +1,14 @@
 """
-🪙 CRYPTO HUNTER BOT V1.0 - CONSERVATEUR
-========================================
-Bot de trading crypto automatisé avec priorité sur la protection du capital
+🪙 CRYPTO HUNTER BOT V2.0 - AVEC LEVERAGE INTELLIGENT
+====================================================
+Bot de trading crypto automatisé avec:
+- Stratégie Momentum Conservatrice
+- Leverage intelligent (quand conditions optimales)
+- API Data Marché (Fear & Greed, Dominance)
+- Protection du capital prioritaire
 
-STRATÉGIE: Momentum Confirmé
 CRYPTOS: BTC, ETH, SOL
-RISQUE: Ultra conservateur (0.5% par trade)
+RISQUE: Conservateur avec boost leverage occasionnel
 
 Auteur: Trading Bot System
 Date: 2024
@@ -42,49 +45,68 @@ import numpy as np
 
 from crypto_strategy import CryptoStrategy
 from crypto_risk import CryptoRiskManager, CryptoVolatilityFilter
+from market_data_api import CryptoMarketData, MarketConditionChecker
+from leverage_manager import LeverageManager, LeverageLevel
 
 
 class CryptoHunterBot:
     """
-    🪙 Bot Crypto Hunter - Trading Automatisé Conservateur
+    🪙 Bot Crypto Hunter V2.0 - Avec Leverage Intelligent
     =====================================================
     
-    - Focus sur BTC, ETH, SOL
-    - Stratégie momentum avec confirmation
-    - Gestion du risque ultra stricte
+    NOUVEAUTÉS V2.0:
+    - Leverage intelligent (max 2x) quand confiance > 85%
+    - API Fear & Greed Index
+    - API Dominance BTC
+    - Vérification conditions marché avant chaque trade
     """
     
     def __init__(self):
         logger.info("=" * 60)
-        logger.info("🪙 CRYPTO HUNTER BOT V1.0 - DÉMARRAGE")
+        logger.info("🪙 CRYPTO HUNTER BOT V2.0 - LEVERAGE INTELLIGENT")
         logger.info("=" * 60)
         
         # API Alpaca
         self.api = self._init_api()
         
-        # Composants
+        # Composants principaux
         self.strategy = CryptoStrategy()
         self.risk_manager = CryptoRiskManager(self.api)
         self.volatility_filter = CryptoVolatilityFilter()
         
+        # NOUVEAU: Market Data & Leverage
+        self.market_data = CryptoMarketData()
+        self.market_checker = MarketConditionChecker()
+        self.leverage_manager = LeverageManager(self.market_checker)
+        
         # Cryptos à trader
         self.symbols = ['BTC/USD', 'ETH/USD', 'SOL/USD']
         
-        # Timeframe (5 minutes pour crypto)
+        # Timeframe
         self.timeframe = '5Min'
         self.bars_needed = 100
         
         # Tracking
         self.last_scan = None
         self.trades_today = 0
-        self.signals_today = []
+        self.leveraged_trades_today = 0
         
         # Timezone
         self.tz = pytz.timezone('America/New_York')
         
-        logger.info(f"📊 Cryptos: {self.symbols}")
-        logger.info(f"⏰ Timeframe: {self.timeframe}")
-        logger.info(f"🛡️ Risque par trade: {self.risk_manager.risk_per_trade*100}%")
+        # Afficher config
+        self._print_config()
+    
+    def _print_config(self):
+        """Affiche la configuration"""
+        logger.info(f"\n📊 CONFIGURATION:")
+        logger.info(f"   Cryptos: {self.symbols}")
+        logger.info(f"   Timeframe: {self.timeframe}")
+        logger.info(f"   Risque par trade: {self.risk_manager.risk_per_trade*100}%")
+        logger.info(f"   Max positions: {self.risk_manager.max_positions}")
+        logger.info(f"   Leverage max: {self.leverage_manager.max_leverage}x")
+        logger.info(f"   Leverage activé si confiance > 80%")
+        logger.info(f"   APIs: Fear & Greed, BTC Dominance\n")
         
     def _init_api(self):
         """Initialise l'API Alpaca"""
@@ -108,11 +130,51 @@ class CryptoHunterBot:
             logger.error(f"❌ Erreur connexion Alpaca: {e}")
             sys.exit(1)
     
+    def check_market_conditions(self) -> dict:
+        """
+        NOUVEAU: Vérifie les conditions de marché via APIs
+        """
+        logger.info("\n🌍 VÉRIFICATION CONDITIONS MARCHÉ...")
+        
+        try:
+            # Fear & Greed
+            fg = self.market_data.get_fear_greed_index()
+            logger.info(f"   🎭 Fear & Greed: {fg['value']} ({fg['classification']})")
+            
+            # BTC Dominance
+            dom = self.market_data.get_btc_dominance()
+            if dom.get('valid'):
+                logger.info(f"   👑 BTC Dominance: {dom['btc_dominance']}%")
+                logger.info(f"   📈 Market Cap 24h: {dom.get('market_cap_change_24h', 0):.2f}%")
+            
+            # Décision globale
+            decision = self.market_data.should_trade_now()
+            
+            logger.info(f"\n   📊 VERDICT MARCHÉ:")
+            logger.info(f"      Peut trader: {'✅' if decision['can_trade'] else '❌'}")
+            logger.info(f"      Peut leverage: {'✅' if decision['can_leverage'] else '❌'}")
+            if decision['leverage_multiplier'] > 1:
+                logger.info(f"      Leverage autorisé: {decision['leverage_multiplier']}x")
+            
+            for reason in decision['reasons']:
+                logger.info(f"      {reason}")
+            
+            return decision
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur vérification marché: {e}")
+            return {
+                'can_trade': True,
+                'can_leverage': False,
+                'leverage_multiplier': 1.0,
+                'confidence_adjustment': 0,
+                'reasons': ['⚠️ Données marché non disponibles']
+            }
+    
     def get_crypto_data(self, symbol: str) -> pd.DataFrame:
         """Récupère les données crypto"""
         try:
-            # Format symbole pour Alpaca
-            alpaca_symbol = symbol.replace('/', '')  # BTC/USD -> BTCUSD
+            alpaca_symbol = symbol.replace('/', '')
             
             bars = self.api.get_crypto_bars(
                 alpaca_symbol,
@@ -124,14 +186,12 @@ class CryptoHunterBot:
                 logger.warning(f"⚠️ Pas de données pour {symbol}")
                 return pd.DataFrame()
             
-            # Reformater
             bars = bars.reset_index()
             bars.columns = [c.lower() for c in bars.columns]
             
             if 'timestamp' in bars.columns:
                 bars = bars.rename(columns={'timestamp': 'time'})
             
-            # Garder colonnes essentielles
             cols = ['time', 'open', 'high', 'low', 'close', 'volume']
             for c in cols:
                 if c not in bars.columns and c != 'time':
@@ -143,13 +203,14 @@ class CryptoHunterBot:
             logger.error(f"❌ Erreur données {symbol}: {e}")
             return pd.DataFrame()
     
-    def scan_opportunities(self):
-        """Scanne toutes les cryptos pour opportunités"""
+    def scan_opportunities(self, market_conditions: dict) -> list:
+        """Scanne les cryptos pour opportunités"""
         logger.info("\n" + "=" * 50)
         logger.info("🔍 SCAN CRYPTO EN COURS...")
         logger.info("=" * 50)
         
         opportunities = []
+        confidence_adj = market_conditions.get('confidence_adjustment', 0)
         
         for symbol in self.symbols:
             try:
@@ -168,9 +229,23 @@ class CryptoHunterBot:
                 # Générer signal
                 signal = self.strategy.generate_signal(df, symbol)
                 
+                # Ajuster confiance selon marché
+                if signal.get('confidence'):
+                    signal['confidence'] += confidence_adj
+                    signal['confidence'] = max(0, min(100, signal['confidence']))
+                
                 logger.info(f"📊 {symbol}: {signal['signal']} | Score: {signal.get('score', 0):.1f}/{signal.get('max_score', 12)} | Confiance: {signal.get('confidence', 0):.0f}%")
                 
                 if signal['signal'] == 'BUY':
+                    # NOUVEAU: Vérifier si leverage possible
+                    leverage_decision = self.leverage_manager.can_use_leverage(
+                        signal, market_conditions
+                    )
+                    signal['leverage_decision'] = leverage_decision
+                    
+                    if leverage_decision.can_leverage:
+                        logger.info(f"   🚀 LEVERAGE {leverage_decision.multiplier}x disponible!")
+                    
                     opportunities.append(signal)
                     
             except Exception as e:
@@ -179,8 +254,8 @@ class CryptoHunterBot:
         self.last_scan = datetime.now(self.tz)
         return opportunities
     
-    def execute_trade(self, signal: dict) -> bool:
-        """Exécute un trade"""
+    def execute_trade(self, signal: dict, market_conditions: dict) -> bool:
+        """Exécute un trade avec gestion du leverage"""
         symbol = signal['symbol']
         
         logger.info(f"\n🎯 TENTATIVE ACHAT {symbol}")
@@ -198,9 +273,24 @@ class CryptoHunterBot:
             return False
         
         qty = position['qty']
+        leverage = 1.0
+        stop_loss = signal['stop_loss']
+        
+        # NOUVEAU: Appliquer leverage si autorisé
+        leverage_decision = signal.get('leverage_decision')
+        if leverage_decision and leverage_decision.can_leverage:
+            leverage = leverage_decision.multiplier
+            
+            # Ajuster stop loss (plus serré avec leverage)
+            stop_pct = leverage_decision.adjusted_stop_loss / 100
+            stop_loss = signal['entry_price'] * (1 - stop_pct)
+            
+            logger.info(f"🚀 LEVERAGE ACTIVÉ: {leverage}x")
+            logger.info(f"   Stop ajusté: ${stop_loss:.2f} ({leverage_decision.adjusted_stop_loss:.2f}%)")
+            
+            self.leverage_manager.open_leveraged_position()
         
         try:
-            # Format symbole Alpaca
             alpaca_symbol = symbol.replace('/', '')
             
             # Passer l'ordre
@@ -216,25 +306,32 @@ class CryptoHunterBot:
             logger.info(f"   Symbole: {symbol}")
             logger.info(f"   Quantité: {qty}")
             logger.info(f"   Prix estimé: ${signal['entry_price']:.2f}")
-            logger.info(f"   Stop Loss: ${signal['stop_loss']:.2f} ({signal['stop_loss_pct']:.1f}%)")
-            logger.info(f"   Take Profit: ${signal['take_profit']:.2f} ({signal['take_profit_pct']:.1f}%)")
+            logger.info(f"   Leverage: {leverage}x")
+            logger.info(f"   Stop Loss: ${stop_loss:.2f}")
+            logger.info(f"   Take Profit: ${signal['take_profit']:.2f}")
             logger.info(f"   Order ID: {order.id}")
             
             # Stocker infos position
             self.risk_manager.positions[symbol] = {
                 'entry': signal['entry_price'],
-                'stop_loss': signal['stop_loss'],
+                'stop_loss': stop_loss,
                 'take_profit': signal['take_profit'],
                 'highest': signal['entry_price'],
+                'leverage': leverage,
                 'order_id': order.id,
                 'time': datetime.now(self.tz)
             }
             
             self.trades_today += 1
+            if leverage > 1:
+                self.leveraged_trades_today += 1
+            
             return True
             
         except Exception as e:
             logger.error(f"❌ Erreur ordre: {e}")
+            if leverage > 1:
+                self.leverage_manager.close_leveraged_position(0)
             return False
     
     def check_exits(self):
@@ -248,27 +345,38 @@ class CryptoHunterBot:
                 
                 logger.info(f"\n🚪 SORTIE {symbol}: {exit_signal['reason']}")
                 
+                # Récupérer info leverage
+                position_info = self.risk_manager.positions.get(symbol, {})
+                leverage = position_info.get('leverage', 1.0)
+                
                 # Fermer la position
                 self.api.close_position(alpaca_symbol)
                 
                 # Enregistrer le trade
-                self.risk_manager.record_trade(exit_signal['pnl'])
+                pnl = exit_signal['pnl']
+                self.risk_manager.record_trade(pnl)
+                
+                # Si c'était une position leverage
+                if leverage > 1:
+                    self.leverage_manager.close_leveraged_position(pnl)
+                    logger.info(f"   🚀 Position leverage {leverage}x fermée")
                 
                 # Nettoyer
                 if symbol in self.risk_manager.positions:
                     del self.risk_manager.positions[symbol]
                 
-                logger.info(f"✅ Position fermée: {exit_signal['pnl_pct']:.2f}% (${exit_signal['pnl']:.2f})")
+                logger.info(f"✅ Position fermée: {exit_signal['pnl_pct']:.2f}% (${pnl:.2f})")
                 
             except Exception as e:
                 logger.error(f"❌ Erreur fermeture {symbol}: {e}")
     
     def print_status(self):
-        """Affiche le statut actuel"""
+        """Affiche le statut complet"""
         status = self.risk_manager.get_risk_status()
+        leverage_status = self.leverage_manager.get_status()
         
         logger.info("\n" + "=" * 50)
-        logger.info("📊 STATUT CRYPTO HUNTER")
+        logger.info("📊 STATUT CRYPTO HUNTER V2.0")
         logger.info("=" * 50)
         logger.info(f"💰 Portfolio: ${status['portfolio_value']:,.2f}")
         logger.info(f"💵 Cash: ${status['cash']:,.2f} ({status['cash_ratio']:.1f}%)")
@@ -276,12 +384,16 @@ class CryptoHunterBot:
         logger.info(f"🎯 Exposition: ${status['exposure']:,.2f} ({status['exposure_pct']:.1f}%)")
         logger.info(f"📊 P&L non réalisé: ${status['unrealized_pnl']:,.2f}")
         logger.info(f"📅 P&L journalier: ${status['daily_pnl']:,.2f}")
-        logger.info(f"🔢 Trades aujourd'hui: {status['daily_trades']}")
+        logger.info(f"🔢 Trades: {status['daily_trades']} (dont {self.leveraged_trades_today} avec leverage)")
+        logger.info(f"🚀 Positions leverage: {leverage_status['leveraged_positions']}/{leverage_status['max_leveraged_positions']}")
         
         if status['positions']:
             logger.info("\n📋 POSITIONS OUVERTES:")
             for pos in status['positions']:
-                logger.info(f"   {pos['symbol']}: {pos['qty']} @ ${pos['entry_price']:.2f} → ${pos['current_price']:.2f} ({pos['unrealized_plpc']:.2f}%)")
+                pos_info = self.risk_manager.positions.get(pos['symbol'], {})
+                leverage = pos_info.get('leverage', 1.0)
+                lev_str = f" (🚀{leverage}x)" if leverage > 1 else ""
+                logger.info(f"   {pos['symbol']}{lev_str}: {pos['qty']} @ ${pos['entry_price']:.2f} → ${pos['current_price']:.2f} ({pos['unrealized_plpc']:.2f}%)")
     
     def trading_cycle(self):
         """Cycle principal de trading"""
@@ -289,23 +401,35 @@ class CryptoHunterBot:
             # 1. Afficher statut
             self.print_status()
             
-            # 2. Vérifier sorties
+            # 2. NOUVEAU: Vérifier conditions marché
+            market_conditions = self.check_market_conditions()
+            
+            if not market_conditions['can_trade']:
+                logger.warning("⛔ Trading suspendu - Conditions marché défavorables")
+                logger.info(f"⏰ Prochain scan dans 5 minutes...")
+                return
+            
+            # 3. Vérifier sorties
             self.check_exits()
             
-            # 3. Scanner opportunités
-            opportunities = self.scan_opportunities()
+            # 4. Scanner opportunités
+            opportunities = self.scan_opportunities(market_conditions)
             
-            # 4. Exécuter meilleure opportunité
+            # 5. Exécuter meilleure opportunité
             if opportunities:
-                # Trier par score/confiance
-                opportunities.sort(key=lambda x: x.get('confidence', 0), reverse=True)
+                # Trier par score puis confiance
+                opportunities.sort(key=lambda x: (x.get('score', 0), x.get('confidence', 0)), reverse=True)
                 best = opportunities[0]
                 
                 logger.info(f"\n🏆 MEILLEURE OPPORTUNITÉ: {best['symbol']}")
                 logger.info(f"   Score: {best['score']:.1f}/{best['max_score']}")
                 logger.info(f"   Confiance: {best['confidence']:.0f}%")
                 
-                self.execute_trade(best)
+                leverage_dec = best.get('leverage_decision')
+                if leverage_dec and leverage_dec.can_leverage:
+                    logger.info(f"   🚀 Leverage: {leverage_dec.multiplier}x disponible")
+                
+                self.execute_trade(best, market_conditions)
             else:
                 logger.info("\n😴 Pas d'opportunité - En attente...")
             
@@ -316,17 +440,18 @@ class CryptoHunterBot:
     
     def run(self):
         """Lance le bot"""
-        logger.info("\n🚀 DÉMARRAGE CRYPTO HUNTER BOT")
-        logger.info("   Trading 24/7 sur BTC, ETH, SOL")
-        logger.info("   Stratégie: Momentum Conservateur")
-        logger.info("   Intervalle: 5 minutes\n")
+        logger.info("\n🚀 DÉMARRAGE CRYPTO HUNTER BOT V2.0")
+        logger.info("   🪙 Trading sur BTC, ETH, SOL")
+        logger.info("   🚀 Leverage intelligent activé")
+        logger.info("   🌍 APIs Marché connectées")
+        logger.info("   ⏰ Intervalle: 5 minutes\n")
         
         # Premier cycle immédiat
         self.trading_cycle()
         
         # Planifier cycles
         schedule.every(5).minutes.do(self.trading_cycle)
-        schedule.every().day.at("00:00").do(self.risk_manager.reset_daily)
+        schedule.every().day.at("00:00").do(self._daily_reset)
         
         # Boucle principale
         while True:
@@ -339,6 +464,13 @@ class CryptoHunterBot:
             except Exception as e:
                 logger.error(f"❌ Erreur: {e}")
                 time.sleep(60)
+    
+    def _daily_reset(self):
+        """Reset quotidien"""
+        self.risk_manager.reset_daily()
+        self.leverage_manager.reset_daily()
+        self.trades_today = 0
+        self.leveraged_trades_today = 0
 
 
 def main():
@@ -346,12 +478,13 @@ def main():
     print("""
     ╔═══════════════════════════════════════════════════════════╗
     ║                                                           ║
-    ║   🪙 CRYPTO HUNTER BOT V1.0                               ║
-    ║   Trading Crypto Automatisé - Conservateur                ║
+    ║   🪙 CRYPTO HUNTER BOT V2.0                               ║
+    ║   Trading Crypto avec Leverage Intelligent                ║
     ║                                                           ║
     ║   Cryptos: BTC, ETH, SOL                                  ║
     ║   Stratégie: Momentum Confirmé                            ║
-    ║   Risque: 0.5% par trade                                  ║
+    ║   Leverage: Max 2x (si confiance > 85%)                   ║
+    ║   APIs: Fear & Greed, BTC Dominance                       ║
     ║                                                           ║
     ╚═══════════════════════════════════════════════════════════╝
     """)
@@ -362,4 +495,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
