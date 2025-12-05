@@ -18,6 +18,7 @@ import pandas as pd
 
 from strategy import TradingStrategy
 from risk_manager import RiskManager
+from market_intelligence import get_market_intelligence
 
 # Configuration du logging
 logging.basicConfig(
@@ -102,6 +103,9 @@ class TradingBot:
         # Initialiser la stratégie et le gestionnaire de risques
         self.strategy = TradingStrategy(self.api)
         self.risk_manager = RiskManager(self.api)
+        
+        # Market Intelligence
+        self.risk_multiplier = 1.0  # Ajusté par Market Intelligence
         
         # État du bot
         self.is_running = True
@@ -197,6 +201,27 @@ class TradingBot:
             return
         
         logger.info("✅ Horaires optimaux - Trading actif")
+        
+        # 🧠 ANALYSE MARKET INTELLIGENCE AVANT TRADING
+        try:
+            intel = get_market_intelligence()
+            market_analysis = intel.full_analysis()
+            
+            if not market_analysis['can_trade']:
+                logger.warning(f"🧠 Market Intelligence: {market_analysis['recommendation']}")
+                for w in market_analysis['warnings'][:3]:
+                    logger.warning(f"   {w}")
+                logger.info("⏸️ Trading suspendu - Conditions défavorables")
+                return
+            
+            # Ajuster le risque selon les conditions
+            self.risk_multiplier = market_analysis['max_risk_multiplier']
+            logger.info(f"🧠 Market Intelligence: Score {market_analysis['score']}/100")
+            logger.info(f"   {market_analysis['recommendation']}")
+            logger.info(f"   Multiplicateur risque: {self.risk_multiplier}x")
+        except Exception as e:
+            logger.warning(f"⚠️ Market Intelligence indisponible: {e}")
+            self.risk_multiplier = 1.0
         
         # Vérifier les limites de risque
         if not self.risk_manager.can_trade():
