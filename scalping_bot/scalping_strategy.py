@@ -104,35 +104,61 @@ class ScalpingStrategy:
         # ═══════════════════════════════════════════════════════════
         # RISQUE (Serré pour scalping)
         # ═══════════════════════════════════════════════════════════
+        # ═══════════════════════════════════════════════════════════
+        # RISQUE (Optimisé R:R 1:3)
+        # ═══════════════════════════════════════════════════════════
         self.base_stop_loss_pct = 0.004      # 0.4% base
-        self.base_take_profit_pct = 0.008    # 0.8% base
-        self.trailing_trigger = 0.004        # Active trailing à +0.4%
-        self.trailing_stop_pct = 0.002       # Trail de 0.2%
+        self.base_take_profit_pct = 0.012    # 1.2% profit cible (Ratio 1:3)
+        self.trailing_trigger = 0.006        # Active trailing à +0.6%
+        self.trailing_stop_pct = 0.003       # Trail de 0.3%
         
-        # Score minimum
-        self.min_score = 7
-        self.min_confidence = 55
+        # Score minimum (Optimisé pour MAX TRADING)
+        self.min_score = 5
+        self.min_confidence = 40
         self.max_score = 13
         
         # News bonus
         self.news_bonus = 1.0
         
     def calculate_vwap(self, df: pd.DataFrame) -> pd.Series:
-        """VWAP avec protection division/0 (VECTORISÉ)"""
+        """
+        VWAP Ancré (Reset quotidien) pour correspondre à TradingView
+        """
         df = df.copy()
-        tp = (df['high'] + df['low'] + df['close']) / 3
-        tp_vol = tp * df['volume']
-        cum_tp_vol = tp_vol.cumsum()
-        cum_vol = df['volume'].cumsum()
-        
-        # Protection VECTORISÉE (pas de boucle)
-        vwap = np.where(
-            (cum_vol != 0) & (~cum_vol.isna()),
-            cum_tp_vol / cum_vol,
-            df['close']
-        )
-        
-        return clean_series(pd.Series(vwap, index=df.index), df['close'].mean())
+        try:
+            # 1. Calculer le Typical Price
+            tp = (df['high'] + df['low'] + df['close']) / 3
+            tp_vol = tp * df['volume']
+            
+            # 2. Identifier les jours (pour reset quotidien)
+            # Si la colonne 'time' existe (cas CryptoHunter)
+            if 'time' in df.columns:
+                # S'assurer que c'est du datetime
+                if not pd.api.types.is_datetime64_any_dtype(df['time']):
+                    df['time'] = pd.to_datetime(df['time'])
+                
+                # GroupBy Date pour le cumulatif (Anchored VWAP)
+                # On utilise transform pour garder la dimension du DF
+                groups = df.groupby(df['time'].dt.date)
+                cum_tp_vol = groups['tp_vol_calc_temp'].cumsum() if 'tp_vol_calc_temp' in df else tp_vol.groupby(df['time'].dt.date).cumsum()
+                cum_vol = groups['volume'].cumsum() if 'volume' in df else df['volume'].groupby(df['time'].dt.date).cumsum()
+            else:
+                # Fallback: Rolling VWAP classique (si pas de 'time')
+                cum_tp_vol = tp_vol.cumsum()
+                cum_vol = df['volume'].cumsum()
+            
+            # 3. Calcul final sécurisé
+            vwap = np.where(
+                (cum_vol != 0) & (~cum_vol.isna()),
+                cum_tp_vol / cum_vol,
+                df['close']
+            )
+            
+            return clean_series(pd.Series(vwap, index=df.index), df['close'].mean())
+            
+        except Exception as e:
+            logger.error(f"Erreur VWAP: {e}")
+            return df['close']  # Fallback sûr
     
     def calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """Calcule tous les indicateurs avec protection complète (VECTORISÉ - Sans warnings)"""

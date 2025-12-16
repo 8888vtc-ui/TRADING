@@ -53,170 +53,149 @@ class NewsSentimentAnalyzer:
     Utilise l'API Alpaca News (gratuite)
     """
     
+    
     def __init__(self, api_key: str = None, secret_key: str = None, base_url: str = None):
         """
-        Initialise l'analyseur avec les credentials Alpaca
+        Initialise l'analyseur avec NewsAPI, Gemini (Google) et Anthropic (Claude)
         """
-        self.api_key = api_key or os.getenv('ALPACA_API_KEY') or os.getenv('APCA_API_KEY_ID')
-        self.secret_key = secret_key or os.getenv('ALPACA_SECRET_KEY') or os.getenv('APCA_API_SECRET_KEY')
-        self.base_url = base_url or 'https://data.alpaca.markets'
+        self.alpaca_key = api_key or os.getenv('ALPACA_API_KEY')
+        self.alpaca_secret = secret_key or os.getenv('ALPACA_SECRET_KEY')
+        self.newsapi_key = os.getenv('NEWSAPI_ORG_KEY')
+        self.gemini_key = os.getenv('GEMINI_API_KEY')
+        self.anthropic_key = os.getenv('ANTHROPIC_API_KEY')
         
         self.api = None
         self._init_api()
         
-        # Cache pour éviter trop d'appels API
+        # Clients externes
+        self.newsapi_client = None
+        if self.newsapi_key:
+            try:
+                from newsapi import NewsApiClient
+                self.newsapi_client = NewsApiClient(api_key=self.newsapi_key)
+                logger.info("✅ NewsAPI.org initialisé")
+            except ImportError:
+                logger.warning("⚠️ newsapi-python non installé")
+
+        # 1. Gemini (Gratuit - Prioritaire)
+        self.gemini_model = None
+        if self.gemini_key:
+            try:
+                import google.generativeai as genai
+                genai.configure(api_key=self.gemini_key)
+                self.gemini_model = genai.GenerativeModel('gemini-pro')
+                logger.info("✅ Google Gemini (Gratuit) initialisé (Prioritaire)")
+            except ImportError:
+                logger.warning("⚠️ google-generativeai non installé")
+
+        # 2. Claude (Payant - Backup)
+        self.anthropic_client = None
+        if self.anthropic_key:
+            try:
+                import anthropic
+                self.anthropic_client = anthropic.Anthropic(api_key=self.anthropic_key)
+                logger.info("✅ Anthropic Claude (Backup) initialisé")
+            except ImportError:
+                logger.warning("⚠️ anthropic non installé")
+        
+        # Cache
         self.cache: Dict[str, Dict] = {}
-        self.cache_duration = timedelta(minutes=5)
+        self.cache_duration = timedelta(minutes=15)
         
-    def _init_api(self):
-        """Initialise l'API Alpaca"""
-        try:
-            from alpaca_trade_api import REST
-            if self.api_key and self.secret_key:
-                self.api = REST(
-                    self.api_key,
-                    self.secret_key,
-                    base_url='https://paper-api.alpaca.markets'
+    def _analyze_with_ai(self, text: str, symbol: str) -> float:
+        """
+        Analyse Double Garantie:
+        1. Essaie Gemini (Gratuit)
+        2. Si échec, essaie Claude (Backup)
+        3. Si échec, méthode classique
+        """
+        
+        # TENTATIVE 1: GEMINI
+        if self.gemini_model:
+            try:
+                prompt = f"""
+                Analyze the sentiment of this news text regarding {symbol} for intraday trading.
+                Return ONLY a number between -1.0 (Very Bearish) and 1.0 (Very Bullish).
+                Text: "{text[:3000]}"
+                """
+                response = self.gemini_model.generate_content(prompt)
+                if response.text:
+                    return float(response.text.strip())
+            except Exception as e:
+                logger.warning(f"⚠️ Gemini a échoué, passage au backup Claude... ({e})")
+
+        # TENTATIVE 2: CLAUDE
+        if self.anthropic_client:
+            try:
+                prompt = f"""
+                Analyze the sentiment of this news text regarding {symbol} for intraday trading.
+                Return ONLY a number between -1.0 (Very Bearish) and 1.0 (Very Bullish).
+                Text: "{text[:2000]}"
+                """
+                message = self.anthropic_client.messages.create(
+                    model="claude-3-haiku-20240307",
+                    max_tokens=10,
+                    messages=[{"role": "user", "content": prompt}]
                 )
-                logger.info("✅ API News initialisée")
-            else:
-                logger.warning("⚠️ Credentials Alpaca non trouvées - News désactivées")
-        except ImportError:
-            logger.warning("⚠️ alpaca_trade_api non installé")
-        except Exception as e:
-            logger.warning(f"⚠️ Erreur init API News: {e}")
-    
-    def _analyze_text_sentiment(self, text: str) -> float:
-        """
-        Analyse simple du sentiment d'un texte
-        
-        Args:
-            text: Texte à analyser
-        
-        Returns:
-            Score entre -1 (négatif) et +1 (positif)
-        """
-        if not text:
-            return 0.0
-        
-        text_lower = text.lower()
-        
-        positive_count = sum(1 for word in POSITIVE_KEYWORDS if word in text_lower)
-        negative_count = sum(1 for word in NEGATIVE_KEYWORDS if word in text_lower)
-        
-        total = positive_count + negative_count
-        if total == 0:
-            return 0.0
-        
-        # Score normalisé entre -1 et +1
-        score = (positive_count - negative_count) / total
-        return max(-1.0, min(1.0, score))
-    
-    def _has_high_impact_event(self, text: str) -> bool:
-        """
-        Vérifie si le texte contient des événements à fort impact
-        """
-        if not text:
-            return False
-        
-        text_lower = text.lower()
-        return any(keyword in text_lower for keyword in HIGH_IMPACT_KEYWORDS)
-    
+                if message.content:
+                    return float(message.content[0].text.strip())
+            except Exception as e:
+                logger.error(f"❌ Claude a aussi échoué: {e}")
+
+        # TENTATIVE 3: SIMPLE (FALLBACK)
+        return self._analyze_text_sentiment(text)
+
     def get_news_sentiment(self, symbol: str, lookback_minutes: int = 60) -> dict:
-        """
-        Récupère et analyse le sentiment des news pour un symbole
+        """Récupère news via Alpaca + NewsAPI et analyse avec AI (Double Garantie)"""
+        cache_key = f"{symbol}_{datetime.now().strftime('%Y%m%d%H')}"
+        if cache_key in self.cache: return self.cache[cache_key]['data']
         
-        Args:
-            symbol: Symbole de l'action (ex: 'AAPL')
-            lookback_minutes: Période à analyser
+        headlines = []
+        full_text = ""
         
-        Returns:
-            dict avec: sentiment_score, news_count, high_impact, headlines
-        """
-        # Vérifier le cache
-        cache_key = f"{symbol}_{datetime.now(NY_TZ).strftime('%Y%m%d%H%M')}"
-        if cache_key in self.cache:
-            cached = self.cache[cache_key]
-            if datetime.now(NY_TZ) - cached['timestamp'] < self.cache_duration:
-                return cached['data']
+        # 1. NewsAPI
+        if self.newsapi_client:
+            try:
+                top_headlines = self.newsapi_client.get_everything(
+                    q=symbol,
+                    language='en',
+                    sort_by='publishedAt',
+                    page_size=5
+                )
+                for article in top_headlines.get('articles', []):
+                    h = article['title']
+                    headlines.append({'headline': h, 'source': 'NewsAPI'})
+                    full_text += f"{h}. "
+            except Exception as e:
+                logger.warning(f"⚠️ NewsAPI Error: {e}")
+
+        # 2. Alpaca News
+        if self.api:
+            try:
+                end = datetime.now(NY_TZ)
+                start = end - timedelta(minutes=lookback_minutes)
+                news = self.api.get_news(symbol=symbol, start=start.isoformat(), end=end.isoformat(), limit=3)
+                for article in news:
+                    h = article.headline
+                    headlines.append({'headline': h, 'source': 'Alpaca'})
+                    full_text += f"{h}. "
+            except: pass
+            
+        # 3. Analyse
+        if not full_text:
+            return {'sentiment_score': 0.0, 'news_count': 0, 'recommendation': 'NEUTRAL'}
+            
+        sentiment_score = self._analyze_with_ai(full_text, symbol)
         
         result = {
-            'sentiment_score': 0.0,
-            'news_count': 0,
-            'high_impact': False,
-            'headlines': [],
-            'recommendation': 'NEUTRAL'
+            'sentiment_score': sentiment_score,
+            'news_count': len(headlines),
+            'high_impact': abs(sentiment_score) > 0.8,
+            'headlines': headlines,
+            'recommendation': 'BULLISH' if sentiment_score > 0.3 else 'BEARISH' if sentiment_score < -0.3 else 'NEUTRAL'
         }
         
-        # Si pas d'API, retourner neutre
-        if not self.api:
-            return result
-        
-        try:
-            # Récupérer les news via Alpaca
-            end = datetime.now(NY_TZ)
-            start = end - timedelta(minutes=lookback_minutes)
-            
-            news = self.api.get_news(
-                symbol=symbol,
-                start=start.isoformat(),
-                end=end.isoformat(),
-                limit=10
-            )
-            
-            if not news:
-                return result
-            
-            sentiments = []
-            headlines = []
-            
-            for article in news:
-                headline = getattr(article, 'headline', '')
-                summary = getattr(article, 'summary', '')
-                
-                full_text = f"{headline} {summary}"
-                
-                # Vérifier événement à fort impact
-                if self._has_high_impact_event(full_text):
-                    result['high_impact'] = True
-                
-                # Analyser le sentiment
-                sentiment = self._analyze_text_sentiment(full_text)
-                sentiments.append(sentiment)
-                headlines.append({
-                    'headline': headline,
-                    'sentiment': sentiment,
-                    'time': getattr(article, 'created_at', '')
-                })
-            
-            # Calculer le sentiment moyen
-            if sentiments:
-                result['sentiment_score'] = sum(sentiments) / len(sentiments)
-                result['news_count'] = len(sentiments)
-                result['headlines'] = headlines[:5]  # Top 5
-                
-                # Recommandation
-                if result['high_impact']:
-                    result['recommendation'] = 'AVOID'  # Éviter pendant événements majeurs
-                elif result['sentiment_score'] > 0.3:
-                    result['recommendation'] = 'BULLISH'
-                elif result['sentiment_score'] < -0.3:
-                    result['recommendation'] = 'BEARISH'
-                else:
-                    result['recommendation'] = 'NEUTRAL'
-            
-            # Mettre en cache
-            self.cache[cache_key] = {
-                'timestamp': datetime.now(NY_TZ),
-                'data': result
-            }
-            
-            logger.info(f"📰 {symbol}: Sentiment={result['sentiment_score']:.2f} "
-                       f"({result['news_count']} news) - {result['recommendation']}")
-            
-        except Exception as e:
-            logger.warning(f"⚠️ Erreur récupération news {symbol}: {e}")
-        
+        self.cache[cache_key] = {'timestamp': datetime.now(), 'data': result}
         return result
     
     def get_market_sentiment(self, symbols: List[str]) -> dict:

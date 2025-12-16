@@ -450,6 +450,44 @@ class TradingEngineV2:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s')
-    print("⚡ Trading Engine V2.0 - Module")
+    # Configuration logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s | %(levelname)s | %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    
+    print("""
+    ⚡ TRADING ENGINE V2.0 - DÉMARRAGE
+    ==================================
+    Mode: 24/7 LOOP
+    Intervalle: ~1 minute
+    """)
+    
+    # Initialisation
+    try:
+        engine = TradingEngineV2()
+        logger.info("✅ Moteur initialisé avec succès")
+    except Exception as e:
+        logger.critical(f"❌ Echec initialisation: {e}")
+        exit(1)
+        
+    # Boucle principale
+    while True:
+        try:
+            # Exécuter un cycle
+            result = engine.run_trading_cycle()
+            
+            # Attendre 60 secondes avant le prochain cycle
+            # (Pour éviter de spammer l'API et respecter les rate limits)
+            sleep_time = 60
+            logger.info(f"⏳ Attente {sleep_time}s...")
+            time.sleep(sleep_time)
+            
+        except KeyboardInterrupt:
+            logger.info("\n🛑 Arrêt manuel demandé")
+            break
+        except Exception as e:
+            logger.error(f"❌ Crash boucle principale: {e}")
+            time.sleep(60)  # Pause de sécurité en cas d'erreur grave
 

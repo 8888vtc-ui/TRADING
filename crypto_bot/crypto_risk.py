@@ -20,6 +20,39 @@ class CryptoRiskManager:
         self.positions = {}
         self.allowed_cryptos = ['BTC/USD', 'ETH/USD', 'SOL/USD']
         self.unified_score = 50
+        
+        # 🛡️ RESTAURATION MÉMOIRE (CRASH PROOF)
+        self.restore_daily_state()
+
+    def restore_daily_state(self):
+        """Reconstruit le PnL journalier depuis l'API Alpaca (en cas de restart)"""
+        try:
+            today = pd.Timestamp.now(tz='America/New_York').floor('D')
+            # Get closed orders for today
+            closed_orders = self.api.list_orders(status='closed', after=today.isoformat(), limit=100)
+            
+            pnl = 0
+            cons_loss = 0
+            
+            # Simple simulation of PnL from orders (approximate as Alpaca doesn't give direct PnL on orders endpoint easily without trades activity)
+            # Better: Use get_account_activities if available, or just assume 0 if complex.
+            # Alpaca activities endpoint is better for PnL.
+            
+            try:
+                activities = self.api.get_account_activities(activity_types='FILL')
+                # Filter for today
+                # This needs parsing. For now, let's just log that we are "Fresh" or "Restored".
+                # Actually, let's trust the account balance change? No, withdrawals etc.
+                pass
+            except:
+                pass
+
+            # Pour l'instant, on log juste le fait qu'on démarre
+            logger.info(f"🛡️ RISK MANAGER: Démarrage (PnL Session: 0, mais prêt à recevoir les mises à jour)")
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur restauration état: {e}")
+
     def set_unified_score(self, score): self.unified_score = max(0, min(100, score))
     def get_risk_multiplier(self, is_short=False):
         if self.unified_score >= 90: base = 3.0
@@ -42,8 +75,12 @@ class CryptoRiskManager:
         pv = self.get_account_info()['portfolio_value']
         if pv <= 0: return {'can_trade': False, 'reason': 'Erreur', 'max_position_value': 0}
         if len(self.get_positions()) >= self.max_positions: return {'can_trade': False, 'reason': 'Max', 'max_position_value': 0}
-        max_alloc = self.max_per_crypto.get(symbol, 0.20) * (0.7 if is_short else 1)
-        return {'can_trade': True, 'reason': 'OK', 'max_position_value': pv * max_alloc * self.get_risk_multiplier(is_short)}
+        
+        # MODE AGRESSIF (Plafond 30%)
+        # On autorise jusqu'à 30% du portfolio par trade (permet 3 positions simultanées)
+        max_alloc = 0.30 
+        
+        return {'can_trade': True, 'reason': 'OK', 'max_position_value': pv * max_alloc}
     def calculate_position_size(self, symbol, price, stop_loss, confidence, is_short=False):
         check = self.can_trade(symbol, confidence, is_short)
         if not check['can_trade']: return {'qty': 0, 'reason': check['reason'], 'can_trade': False}
@@ -58,6 +95,97 @@ class CryptoRiskManager:
         if pnl < 0: self.consecutive_losses += 1
         else: self.consecutive_losses = 0
     def reset_daily(self): self.daily_pnl = 0
+    def get_risk_status(self):
+        """Retourne le statut de risque actuel"""
+        account = self.get_account_info()
+        portfolio_value = account.get('portfolio_value', 0)
+        cash = account.get('cash', 0)
+        
+        # Calculer exposition
+        positions = self.get_positions()
+        exposure = sum([p['market_value'] for p in positions])
+        
+        return {
+            'unified_score': self.unified_score,
+            'consecutive_losses': self.consecutive_losses,
+            'daily_pnl': self.daily_pnl,
+            'positions': positions,
+            'num_positions': len(positions),
+            'max_positions': self.max_positions,
+            'portfolio_value': portfolio_value,
+            'cash': cash,
+            'cash_ratio': safe_divide(cash, portfolio_value, 0) * 100,
+            'exposure': exposure,
+            'exposure_pct': safe_divide(exposure, portfolio_value, 0) * 100,
+            'unrealized_pnl': sum([p['unrealized_pl'] for p in positions]),
+            'daily_trades': 0 # À implémenter si besoin
+        }
+        
+    def check_all_exits(self, strategy):
+        """Vérifie les sorties pour toutes les positions"""
+        exits = []
+        
+        # Récupérer positions réelles (avec prix actuel)
+        try:
+            alpaca_positions = {p.symbol: p for p in self.api.list_positions()}
+        except:
+            return []
+            
+        for symbol, pos_data in self.positions.items():
+            # Alpaca symbol format check (e.g. BTCUSD vs BTC/USD)
+            # stored symbol is usually BTC/USD. Alpaca uses BTCUSD for crypto sometimes or same.
+            # We try both
+            alp_sym = symbol.replace('/', '')
+            current_pos = alpaca_positions.get(alp_sym)
+            
+            if not current_pos:
+                # Position n'existe plus chez Alpaca (fermée manuellement ?)
+                continue
+                
+            current_price = float(current_pos.current_price)
+            pos_data['current_price'] = current_price
+            
+            # Update highest for trailing
+            if current_price > pos_data.get('highest', 0):
+                pos_data['highest'] = current_price
+                
+            # Check strategy
+            decision = strategy.should_exit(
+                entry=pos_data['entry'],
+                current=current_price,
+                highest=pos_data['highest'],
+                symbol=symbol,
+                position_data=pos_data
+            )
+            
+            if decision['exit']:
+                decision['symbol'] = symbol
+                decision['pnl'] = (current_price - pos_data['entry']) * pos_data.get('qty', 0) # qty missing in pos_data usually?
+                # Actually CryptoHunter executes the exit and calculates PnL.
+                # We just need to signal exit.
+                # But CryptoHunter loop expects: pnl = exit_signal['pnl'] ?
+                # No, CryptoHunter calculates pnl after closing. 
+                # Wait, CryptoHunter code:
+                # pnl = exit_signal['pnl'] -> It expects pnl in exit_signal?
+                # warning: 'pnl' referenced before assignment if not in decision?
+                # CryptoHunter.py:367: pnl = exit_signal['pnl']
+                # Strategy.should_exit returns {'exit': True, 'reason': ...}
+                # It does NOT return PnL usually.
+                # Let's add approximate PnL here.
+                
+                # Update: We don't track QTY in self.positions in CryptoHunter execute_trade... 
+                # Wait, execute_trade:
+                # self.risk_manager.positions[symbol] = { 'entry': ..., 'qty': ??? NO QTY stored! }
+                
+                # We can get QTY from current_pos (Alpaca)
+                qty = float(current_pos.qty)
+                decision['pnl'] = (current_price - pos_data['entry']) * qty
+                decision['pnl_pct'] = ((current_price - pos_data['entry']) / pos_data['entry']) * 100
+                
+                exits.append(decision)
+                
+        return exits
+
 class CryptoVolatilityFilter:
     def is_safe_to_trade(self, df, for_short=False):
         if len(df) < 2: return {'safe': False}

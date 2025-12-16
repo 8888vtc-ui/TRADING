@@ -33,7 +33,8 @@ class LeverageManager:
         self.panic_mode = False
         self.fear_greed = 50
         self.market_change_24h = 0
-        self.long_matrix = {(90, 101): 5.0, (80, 90): 3.0, (70, 80): 2.0, (60, 70): 1.5, (55, 60): 1.0, (0, 55): 0}
+        # Matrice Agressive (Max Trading)
+        self.long_matrix = {(85, 101): 5.0, (75, 85): 3.0, (65, 75): 2.0, (55, 65): 1.5, (45, 55): 1.0, (0, 45): 0}
         self.short_matrix = {(0, 15): 5.0, (15, 25): 3.0, (25, 35): 2.0, (35, 45): 1.5}
         self.stop_multipliers = {LeverageLevel.NONE: 1.0, LeverageLevel.LOW: 0.75, LeverageLevel.MEDIUM: 0.60, LeverageLevel.HIGH: 0.45, LeverageLevel.EXTREME: 0.30}
     def set_market_conditions(self, fear_greed, market_change_24h):
@@ -65,4 +66,11 @@ class LeverageManager:
     def close_leveraged_position(self, pnl): self.leveraged_positions = max(0, self.leveraged_positions - 1)
     def get_status(self):
         lev, direction = self.get_optimal_leverage_and_direction()
-        return {'unified_score': self.unified_score, 'leverage': f'{lev}x', 'direction': direction.value, 'panic_mode': self.panic_mode}
+        return {
+            'unified_score': self.unified_score,
+            'leverage': f'{lev}x',
+            'direction': direction.value,
+            'panic_mode': self.panic_mode,
+            'leveraged_positions': self.leveraged_positions,
+            'max_leveraged_positions': self.max_leveraged_positions
+        }

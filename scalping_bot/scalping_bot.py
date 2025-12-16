@@ -97,6 +97,11 @@ SCALPING_SYMBOLS = [
     'META',   # Meta - Volatile
     'AAPL',   # Apple - Liquide
     'MSFT',   # Microsoft - Stable mais liquide
+    'DOGE/USD', # DOGE - Meme Coin Volatile
+    'SHIB/USD', # SHIB - Meme Coin Volatile
+    'PEPE/USD', # PEPE - Meme Coin Ultra Volatile
+    'SQQQ',   # 📉 SHORT NASDAQ x3 (Boom quand ça crash)
+    'UVXY',   # 😱 VIX (Indice de la peur)
 ]
 
 # Horaires de scalping optimaux (heure New York)
@@ -403,40 +408,64 @@ class ScalpingBot:
         
         self.session_stats['scans_completed'] += 1
         
-        # Scanner chaque symbole
-        for symbol in self.symbols:
-            # Skip si déjà en position
-            if symbol in self.risk_manager.open_positions:
-                continue
-            
-            # 📰 Vérifier le sentiment des news
-            should_trade, sentiment_reason, sentiment_score = self.sentiment_analyzer.should_trade(symbol)
-            
-            if not should_trade:
-                logger.info(f"📰 {symbol}: Skip - {sentiment_reason}")
-                continue
-            
-            # Récupérer les données
-            df = self.get_market_data(symbol, timeframe='1Min', limit=100)
-            
-            if df.empty:
-                continue
-            
-            # Générer le signal AVEC le sentiment
-            signal = self.strategy.generate_signal(df, news_sentiment=sentiment_score)
-            
-            if signal['signal'] == 'BUY' and signal['confidence'] >= 60:
-                self.session_stats['signals_generated'] += 1
+        self.session_stats['scans_completed'] += 1
+        
+        # Exécution Parallèle (V12 Engine)
+        import concurrent.futures
+        
+        def scan_single(symbol):
+            try:
+                # Skip si déjà en position
+                if symbol in self.risk_manager.open_positions:
+                    return None
+                    
+                # 📰 Vérifier le sentiment des news
+                should_trade, sentiment_reason, sentiment_score = self.sentiment_analyzer.should_trade(symbol)
                 
-                logger.info(f"🎯 SIGNAL ACHAT: {symbol}")
-                logger.info(f"   Confiance: {signal['confidence']:.1f}%")
-                logger.info(f"   Score: {signal['score']}/{signal['max_score']}")
-                logger.info(f"   📰 Sentiment: {sentiment_score:.2f} ({sentiment_reason})")
-                for reason in signal.get('reasons', [])[:5]:
-                    logger.info(f"   {reason}")
+                if not should_trade:
+                    # logger.info(f"📰 {symbol}: Skip - {sentiment_reason}") # Réduire logs
+                    return None
+                    
+                # Récupérer les données
+                df = self.get_market_data(symbol, timeframe='1Min', limit=100)
                 
-                # Exécuter l'achat
-                self.execute_buy(symbol, signal)
+                if df.empty:
+                    return None
+                    
+                # Générer le signal AVEC le sentiment
+                signal = self.strategy.generate_signal(df, news_sentiment=sentiment_score)
+                
+                if signal['signal'] == 'BUY' and signal['confidence'] >= 60:
+                    return {
+                        'symbol': symbol,
+                        'signal': signal,
+                        'sentiment_score': sentiment_score,
+                        'sentiment_reason': sentiment_reason
+                    }
+            except Exception as e:
+                logger.error(f"Erreur scan {symbol}: {e}")
+            return None
+
+        # Lancer les scans en parallèle
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            futures = {executor.submit(scan_single, sym): sym for sym in self.symbols}
+            
+            for future in concurrent.futures.as_completed(futures):
+                res = future.result()
+                if res:
+                    sym = res['symbol']
+                    sig = res['signal']
+                    sent_score = res['sentiment_score']
+                    sent_reason = res['sentiment_reason']
+                    
+                    self.session_stats['signals_generated'] += 1
+                    logger.info(f"🎯 SIGNAL ACHAT: {sym}")
+                    logger.info(f"   Confiance: {sig['confidence']:.1f}%")
+                    logger.info(f"   Score: {sig['score']}/{sig['max_score']}")
+                    logger.info(f"   📰 Sentiment: {sent_score:.2f} ({sent_reason})")
+                    
+                    # Exécuter l'achat
+                    self.execute_buy(sym, sig)
         
         # Vérifier les positions existantes
         self.check_open_positions()

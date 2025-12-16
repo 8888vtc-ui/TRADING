@@ -56,8 +56,11 @@ class ScalpingRiskManager:
         # ═══════════════════════════════════════════════════════════
         # LIMITES DE RISQUE
         # ═══════════════════════════════════════════════════════════
-        self.risk_per_trade = 0.005      # 0.5% par trade
-        self.max_risk_trade = 0.01       # 1% max absolu
+        # ═══════════════════════════════════════════════════════════
+        # LIMITES DE RISQUE (MODE AGRESSIF)
+        # ═══════════════════════════════════════════════════════════
+        self.risk_per_trade = 0.010      # 1.0% par trade (au lieu de 0.5%)
+        self.max_risk_trade = 0.02       # 2% max absolu
         
         self.max_daily_loss = 0.02       # -2% max/jour
         self.max_daily_profit = 0.05     # +5% objectif
@@ -158,6 +161,9 @@ class ScalpingRiskManager:
             return False, f"Max positions ({self.max_positions})"
         
         return True, "OK"
+    
+    # Alias pour compatibilité
+    check_trading_allowed = can_trade
     
     def check_sector_limit(self, symbol: str) -> tuple:
         """Vérifie la limite par secteur"""
@@ -371,6 +377,21 @@ class ScalpingRiskManager:
         logger.info(f"   Capital: ${s['capital']:,.2f}")
         logger.info(f"   All-Time PnL: ${s['all_time_pnl']:+.2f}")
         logger.info("═" * 60)
+        
+    @property
+    def open_positions(self):
+        """Alias de compatibilité"""
+        return self.positions
+
+    def update_position_price(self, symbol: str, price: float):
+        """Met à jour le prix actuel d'une position"""
+        if symbol in self.positions:
+            self.positions[symbol]['current_price'] = price
+            self.update_highest(symbol, price)
+
+    def check_open_positions(self):
+        """Méthode de compatibilité pour éviter crash si appelée par erreur"""
+        return
 
 
 if __name__ == "__main__":

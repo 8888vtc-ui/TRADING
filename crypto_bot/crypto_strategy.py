@@ -80,19 +80,20 @@ class CryptoStrategy:
         # ═══════════════════════════════════════════════════════════
         
         # Stops plus larges pour crypto (volatilité)
+        # Stops ajustés volatilité (Mode Max Trading)
         self.stop_loss_pct = {
-            'BTC': 0.015,   # 1.5% pour BTC
-            'ETH': 0.02,    # 2% pour ETH
-            'SOL': 0.025,   # 2.5% pour SOL
-            'default': 0.02
+            'BTC': 0.020,   # 2.0% pour BTC
+            'ETH': 0.025,   # 2.5% pour ETH
+            'SOL': 0.035,   # 3.5% pour SOL
+            'default': 0.03
         }
         
-        # Take profit conservateur
+        # Take profit AGRESSIF (Laissez courir les gains)
         self.take_profit_pct = {
-            'BTC': 0.03,    # 3% pour BTC (ratio 1:2)
-            'ETH': 0.04,    # 4% pour ETH
-            'SOL': 0.05,    # 5% pour SOL
-            'default': 0.04
+            'BTC': 0.045,   # 4.5% pour BTC
+            'ETH': 0.060,   # 6.0% pour ETH
+            'SOL': 0.075,   # 7.5% pour SOL
+            'default': 0.06
         }
         
         # Score ÉLEVÉ = Moins de trades mais meilleure qualité
