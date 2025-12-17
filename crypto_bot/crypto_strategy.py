@@ -97,8 +97,8 @@ class CryptoStrategy:
         }
         
         # Score ÉLEVÉ = Moins de trades mais meilleure qualité
-        self.min_score = 8          # Sur 12 (conservateur)
-        self.min_confidence = 65    # 65% minimum
+        self.min_score = 6          # Sur 12 (Optimal/Modéré)
+        self.min_confidence = 55    # 55% minimum
         self.max_score = 12
         
         # Filtres de sécurité
@@ -247,10 +247,10 @@ class CryptoStrategy:
         rsi = sv(row.get('rsi'), 50)
         prev_rsi = sv(prev.get('rsi'), 50)
         
-        if 35 <= rsi <= 55:
+        if 30 <= rsi <= 60:
             score += 2
-            reasons.append(f"✅ RSI zone rebond ({rsi:.0f})")
-        elif 55 < rsi < 65:
+            reasons.append(f"✅ RSI zone rebond large ({rsi:.0f})")
+        elif 60 < rsi < 70:
             score += 1
             reasons.append(f"✅ RSI momentum ({rsi:.0f})")
         elif rsi >= 70:
